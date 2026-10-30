@@ -6,51 +6,84 @@
 @media (prefers-color-scheme:dark){:root{--bg:#161615;--fg:#ecece8;--mut:#9a9a93;--card:#1f1f1d;--line:#34342f;--acc:#7da2ff;--ok:#4cc38a;--bad:#ff8a80;--warn:#e3b341}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,sans-serif}
 main{max-width:980px;margin:0 auto;padding:20px 16px 60px}
-h1{font-size:20px;margin:0 0 4px}p.sub{color:var(--mut);margin:0 0 18px}
+h1{font-size:20px;margin:0 0 4px}p.sub,.sub{color:var(--mut)}p.sub{margin:0 0 18px}
 section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
 h2{font-size:14px;margin:0 0 12px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--mut)}
-input,select,button{font:inherit;padding:7px 10px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+input,select,textarea,button{font:inherit;padding:7px 10px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
 button{cursor:pointer;background:var(--acc);color:#fff;border-color:var(--acc)}button.sec{background:var(--bg);color:var(--fg);border-color:var(--line)}
 button:disabled{opacity:.5;cursor:default}
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:14px;flex-wrap:wrap}
+.tab{background:none;color:var(--mut);border:1px solid transparent;border-bottom:none;border-radius:8px 8px 0 0;padding:8px 14px;margin-bottom:-1px}
+.tab.active{background:var(--card);color:var(--fg);border-color:var(--line);font-weight:600}
+.tab .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--line);margin-right:6px}
+.tab .dot.on{background:var(--ok)}.tab .n{color:var(--acc);margin-left:6px;font-size:12px}
+.panel[hidden]{display:none}
+.creds{border:1px dashed var(--line);border-radius:8px;padding:10px;margin-bottom:12px}
 .badges span{display:inline-block;padding:2px 8px;border-radius:99px;border:1px solid var(--line);margin-right:6px;font-size:12px}
 .on{color:var(--ok)}.off{color:var(--bad)}
-#repos{max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:7px;margin-top:10px}
-#repos label{flex-direction:row;align-items:center;gap:8px;padding:5px 10px;color:var(--fg);font-size:13px;border-bottom:1px solid var(--line)}
+.repos{max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:7px;margin-top:10px}
+.repos label{flex-direction:row;align-items:center;gap:8px;padding:5px 10px;color:var(--fg);font-size:13px;border-bottom:1px solid var(--line)}
 table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);font-size:13px}
 pre{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:10px;max-height:300px;overflow:auto;font-size:12px;white-space:pre-wrap;margin:8px 0 0}
 .warn{color:var(--warn)}.err{color:var(--bad)}a{color:var(--acc)}
+.chips span{display:inline-block;background:var(--bg);border:1px solid var(--line);border-radius:99px;padding:1px 9px;margin:2px 4px 2px 0;font-size:12px}
 </style></head><body><main>
 <h1>Sample &amp; Scrub</h1>
 <p class="sub">Restate a repo to its first N% of commits, then redact it with the PII pipeline. GitHub, GitLab and Bitbucket.</p>
 
 <section><h2>Setup</h2><div class="badges" id="cfg">loading…</div></section>
 
-<section><h2>Credentials <span style="text-transform:none;letter-spacing:0">(kept in server memory only; never saved, logged or shown again)</span></h2>
-<div class="row">
-<label>GitHub token<input id="t_github" type="password" autocomplete="off" placeholder="ghp_…"></label>
-<label>GitLab token<input id="t_gitlab" type="password" autocomplete="off" placeholder="glpat-…"></label>
-<label>Bitbucket token<input id="t_bitbucket" type="password" autocomplete="off" placeholder="ATATT… or access token"></label>
-<label>Bitbucket email (scoped tokens only)<input id="t_bbemail" type="email" autocomplete="off" placeholder="you@example.com"></label>
-<button id="savecreds">Save</button><button class="sec" id="clearcreds">Clear all</button>
-</div><div id="credmsg" class="sub"></div></section>
-
 <section><h2>1 · Pick repos</h2>
-<div class="row">
-<label>Platform<select id="platform"><option>github</option><option>gitlab</option><option>bitbucket</option></select></label>
-<label id="ownerlbl">Org / group / workspace<input id="owner" placeholder="my-org"></label>
-<label>Self-hosted host (optional)<input id="host" placeholder="gitlab.example.com"></label>
-<button id="listbtn">List repos</button>
+<div class="tabs" id="tabs"></div>
+
+<div class="panel" data-p="github">
+ <div class="creds"><div class="row">
+  <label>GitHub token<input id="t_github" type="password" autocomplete="off" placeholder="ghp_… (classic: repo, read:org)"></label>
+  <button data-save="github">Save</button><button class="sec" data-clear="github">Clear</button><span class="sub" id="cm_github"></span></div>
+  <div class="sub">Kept in server memory only; never saved, logged or shown again.</div></div>
+ <div class="row"><label>Org or user<input id="o_github" placeholder="my-org"></label>
+  <label>Enterprise host (optional)<input id="h_github" placeholder="github.example.com"></label>
+  <button data-list="github">List repos</button></div>
 </div>
-<div class="row" style="margin-top:10px">
-<label style="flex:1">Local path: a repo, or a folder containing repos (absolute path)<input id="localpath" placeholder="/Users/me/repos"></label>
-<button class="sec" id="scanbtn">Scan path</button>
+
+<div class="panel" data-p="gitlab" hidden>
+ <div class="creds"><div class="row">
+  <label>GitLab token<input id="t_gitlab" type="password" autocomplete="off" placeholder="glpat-… (read_api + read_repository)"></label>
+  <button data-save="gitlab">Save</button><button class="sec" data-clear="gitlab">Clear</button><span class="sub" id="cm_gitlab"></span></div>
+  <div class="sub">Classic PAT, Reporter or higher. Fine-grained GitLab tokens return an empty list.</div></div>
+ <div class="row"><label>Group<input id="o_gitlab" placeholder="my-group"></label>
+  <label>Self-hosted host (optional)<input id="h_gitlab" placeholder="gitlab.example.com"></label>
+  <button data-list="gitlab">List repos</button></div>
 </div>
-<div class="row" style="margin-top:10px">
-<label style="flex:1">…or paste repos (one per line: owner/repo, platform:owner/repo, or URL)<textarea id="paste" rows="2" style="font:inherit;padding:7px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--fg)"></textarea></label></div>
-<div id="listmsg" class="warn"></div>
-<div id="repos" hidden></div>
-<div class="row" id="selrow" hidden style="margin-top:8px"><button class="sec" id="all">Select all</button><button class="sec" id="none">None</button><span id="count" class="sub"></span></div>
+
+<div class="panel" data-p="bitbucket" hidden>
+ <div class="creds"><div class="row">
+  <label>Bitbucket token<input id="t_bitbucket" type="password" autocomplete="off" placeholder="ATATT… or workspace access token"></label>
+  <label>Atlassian email (scoped tokens only)<input id="t_bitbucket_email" type="email" autocomplete="off" placeholder="you@example.com"></label>
+  <button data-save="bitbucket">Save</button><button class="sec" data-clear="bitbucket">Clear</button><span class="sub" id="cm_bitbucket"></span></div>
+  <div class="sub">Leave the email empty for workspace/repository access tokens. Bitbucket has no account-wide discovery: enter the workspace slug.</div></div>
+ <div class="row"><label>Workspace slug<input id="o_bitbucket" placeholder="my-workspace"></label>
+  <button data-list="bitbucket">List repos</button></div>
+</div>
+
+<div class="panel" data-p="local" hidden>
+ <div class="row"><label style="flex:1;min-width:280px">Absolute path: a repo, or a folder containing repos<input id="o_local" placeholder="/Users/me/repos"></label>
+  <button data-list="local">Scan path</button></div>
+ <div class="sub" style="margin-top:6px">Local repos need no credentials. The scan looks one level down and the repo must be a full (not partial) clone.</div>
+</div>
+
+<div id="listmsg" class="warn" style="margin-top:8px"></div>
+<div id="listwrap" hidden>
+ <div class="row" style="margin-top:10px"><input id="filter" placeholder="Filter…" style="flex:1;min-width:160px">
+  <button class="sec" id="all">Select shown</button><button class="sec" id="none">Deselect shown</button></div>
+ <div class="repos" id="repos"></div>
+</div>
+
+<div style="margin-top:14px"><b>Selected</b> <span id="count" class="sub"></span> <button class="sec" id="clearsel" style="padding:2px 8px;font-size:12px">Clear selection</button>
+ <div class="chips" id="chips"></div></div>
+<label style="margin-top:8px">…or paste repos (one per line: owner/repo, platform:owner/repo, URL, or an absolute local path)
+ <textarea id="paste" rows="2"></textarea></label>
 </section>
 
 <section><h2>2 · Options</h2><div class="row">
@@ -64,43 +97,55 @@ pre{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:
 <div class="row" style="margin-top:12px"><button id="run">Sample &amp; scrub selected</button><span id="runmsg" class="err"></span></div>
 </section>
 
-<section><h2>3 · Jobs</h2><table id="jobs"><thead><tr><th>Job</th><th>Status</th><th>Repos</th><th>Mode</th><th></th></tr></thead><tbody></tbody></table>
+<section><h2>3 · Jobs</h2><table id="jobs"><thead><tr><th>Job</th><th>Status</th><th>Repos</th><th>Mode</th></tr></thead><tbody></tbody></table>
 <div id="detail" hidden><h2 style="margin-top:16px" id="dtitle"></h2><table id="results"></table><pre id="log"></pre></div></section>
 </main>
 <script>
-const $=id=>document.getElementById(id);let selected=new Set(),openJob=null;
+const $=id=>document.getElementById(id),Q=s=>document.querySelector(s),QA=s=>[...document.querySelectorAll(s)];
+const TABS=[['github','GitHub'],['gitlab','GitLab'],['bitbucket','Bitbucket'],['local','Local']];
+let active='github',selected=new Set(),lists={},openJob=null,tokens={};
 const api=async(p,b)=>{const r=await fetch(p,b?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}:{});const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j};
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-async function cfg(){try{const c=await api('/api/config');const b=(ok,t)=>`<span class="${ok?'on':'off'}">${ok?'●':'○'} ${t}</span>`;
-$('cfg').innerHTML=b(c.tokens.github,'GitHub token')+b(c.tokens.gitlab,'GitLab token')+b(c.tokens.bitbucket,'Bitbucket token'+(c.tokens.bitbucket&&!c.bitbucket_email?' (no email: access-token mode)':''))+b(c.profiler,'codebase-profiler')+b(c.pii_scrub,'repo-pii-scrub')+b(c.salt,'REPO_SANITIZER_SALT')+`<span>outputs: ${esc(c.outputs)}</span>`}catch(e){$('cfg').textContent=e.message}}
-$('platform').onchange=()=>{$('ownerlbl').firstChild.textContent=({github:'Org / user',gitlab:'Group',bitbucket:'Workspace slug'})[$('platform').value]};
+const platOf=ref=>ref.split(':')[0];
+
+function drawTabs(){$('tabs').innerHTML=TABS.map(([k,n])=>{const c=[...selected].filter(r=>platOf(r)===k).length;
+ return`<button class="tab ${k===active?'active':''}" data-t="${k}">${k!=='local'?`<span class="dot ${tokens[k]?'on':''}"></span>`:''}${n}${c?`<span class="n">${c}</span>`:''}</button>`}).join('');
+ QA('.tab').forEach(b=>b.onclick=()=>{active=b.dataset.t;drawTabs();showPanel()})}
+function showPanel(){QA('.panel').forEach(p=>p.hidden=p.dataset.p!==active);$('listmsg').textContent='';drawList()}
+function drawList(){const rs=lists[active];$('listwrap').hidden=!rs;if(!rs)return;const f=$('filter').value.toLowerCase();
+ const shown=rs.filter(r=>!f||r.name.toLowerCase().includes(f));
+ $('repos').innerHTML=shown.map(r=>`<label><input type="checkbox" value="${esc(r.ref)}" ${selected.has(r.ref)?'checked':''}> ${esc(r.name)} <span class="sub">${esc(r.branch)}</span></label>`).join('')||'<p class="sub" style="padding:8px">No repos'+(rs.length?' match the filter':' found (local scan looks only one level down)')+'.</p>';
+ QA('#repos input').forEach(i=>i.onchange=()=>{i.checked?selected.add(i.value):selected.delete(i.value);drawSel()})}
+function drawSel(){$('count').textContent=selected.size+' selected';$('chips').innerHTML=[...selected].map(r=>`<span>${esc(r)}</span>`).join('');drawTabs()}
+$('filter').oninput=drawList;
+$('all').onclick=()=>{QA('#repos input').forEach(i=>{i.checked=true;selected.add(i.value)});drawSel()};
+$('none').onclick=()=>{QA('#repos input').forEach(i=>{i.checked=false;selected.delete(i.value)});drawSel()};
+$('clearsel').onclick=()=>{selected.clear();drawList();drawSel()};
+
+async function cfg(){try{const c=await api('/api/config');tokens=c.tokens;const b=(ok,t)=>`<span class="${ok?'on':'off'}">${ok?'●':'○'} ${t}</span>`;
+ $('cfg').innerHTML=b(c.profiler,'codebase-profiler')+b(c.pii_scrub,'repo-pii-scrub')+b(c.salt,'REPO_SANITIZER_SALT')+`<span>outputs: ${esc(c.outputs)}</span>`;
+ for(const k of ['github','gitlab','bitbucket'])$('cm_'+k).textContent=c.tokens[k]?'● token set':'○ no token';drawTabs()}catch(e){$('cfg').textContent=e.message}}
+async function creds(b){try{await api('/api/credentials',b);QA('.creds input').forEach(i=>i.value='');await cfg()}catch(e){$('listmsg').textContent=e.message}}
+QA('[data-save]').forEach(b=>b.onclick=()=>{const k=b.dataset.save,body={};body[k]=$('t_'+k).value;if(k==='bitbucket')body.bitbucket_email=$('t_bitbucket_email').value;creds(body)});
+QA('[data-clear]').forEach(b=>b.onclick=()=>creds({clear:b.dataset.clear}));
+QA('[data-list]').forEach(b=>b.onclick=async()=>{const k=b.dataset.list;$('listmsg').textContent='';b.disabled=true;try{
+ lists[k]=k==='local'?await api('/api/scan',{path:$('o_local').value}):await api('/api/list',{platform:k,owner:$('o_'+k).value,host:$('h_'+k)?$('h_'+k).value:''});$('filter').value='';drawList()}
+ catch(e){$('listmsg').textContent=e.message}b.disabled=false});
 $('fast').onchange=()=>$('fastwarn').hidden=!$('fast').checked;
-function count(){$('count').textContent=selected.size+' selected'}
-function showRepos(rs){
-$('repos').hidden=$('selrow').hidden=false;$('repos').innerHTML=rs.map(r=>`<label><input type="checkbox" value="${esc(r.ref)}"> ${esc(r.name)} <span class="sub">${esc(r.branch)}</span></label>`).join('')||'<p class="sub" style="padding:8px">No repos found (local scan looks only one level down).</p>';
-$('repos').querySelectorAll('input').forEach(i=>i.onchange=()=>{i.checked?selected.add(i.value):selected.delete(i.value);count()});selected.clear();count()}
-$('listbtn').onclick=async()=>{$('listmsg').textContent='';$('listbtn').disabled=true;try{
-showRepos(await api('/api/list',{platform:$('platform').value,owner:$('owner').value,host:$('host').value}))}
-catch(e){$('listmsg').textContent=e.message}$('listbtn').disabled=false};
-$('scanbtn').onclick=async()=>{$('listmsg').textContent='';try{showRepos(await api('/api/scan',{path:$('localpath').value}))}catch(e){$('listmsg').textContent=e.message}};
-async function creds(b){try{await api('/api/credentials',b);['t_github','t_gitlab','t_bitbucket','t_bbemail'].forEach(i=>$(i).value='');$('credmsg').textContent=b.clear?'Cleared.':'Saved in memory.';cfg()}catch(e){$('credmsg').textContent=e.message}}
-$('savecreds').onclick=()=>creds({github:$('t_github').value,gitlab:$('t_gitlab').value,bitbucket:$('t_bitbucket').value,bitbucket_email:$('t_bbemail').value});
-$('clearcreds').onclick=()=>creds({clear:true});
-$('all').onclick=()=>$('repos').querySelectorAll('input').forEach(i=>{i.checked=true;selected.add(i.value)})||count();
-$('none').onclick=()=>{$('repos').querySelectorAll('input').forEach(i=>i.checked=false);selected.clear();count()};
+
 $('run').onclick=async()=>{$('runmsg').textContent='';
-const pasted=$('paste').value.split('\n').map(s=>s.trim()).filter(Boolean);
-const isRef=p=>/^(github|gitlab|bitbucket|local):/.test(p)||p.includes('://')||p.startsWith('git@');
-const repos=[...new Set([...selected,...pasted.map(p=>p.startsWith('/')?'local:'+p:isRef(p)?p:$('platform').value+':'+p)])];
-try{const j=await api('/api/jobs',{repos,pct:+$('pct').value,min_commits:+$('minc').value,branch:$('branch').value,terms:$('terms').value.split(',').map(s=>s.trim()).filter(Boolean),fast:$('fast').checked});openJob=j.id;poll()}
-catch(e){$('runmsg').textContent=e.message}};
-async function poll(){try{const js=await api('/api/jobs');$('jobs').tBodies[0].innerHTML=js.map(j=>`<tr><td><a href="#" data-j="${esc(j.id)}">${esc(j.id)}</a></td><td>${esc(j.status)}</td><td>${j.repos.length}</td><td>${j.fast?'<span class="warn">fast</span>':'full'} · ${j.pct}%</td><td></td></tr>`).join('');
-document.querySelectorAll('[data-j]').forEach(a=>a.onclick=e=>{e.preventDefault();openJob=a.dataset.j;poll()});
-if(openJob){const j=await api('/api/jobs/'+openJob);$('detail').hidden=false;$('dtitle').textContent=j.id+' — '+j.status;
-$('results').innerHTML='<tr><th>Repo</th><th>Result</th><th>Files</th></tr>'+j.repos.map(r=>{const x=j.results[r];if(!x)return`<tr><td>${esc(r)}</td><td>${j.status==='queued'?'queued':'…'}</td><td></td></tr>`;
-if(!x.ok)return`<tr><td>${esc(r)}</td><td class="err">${esc(x.error)}</td><td></td></tr>`;
-const b=`/download/${encodeURIComponent(j.id)}/${encodeURIComponent(x.slug)}/`;
-return`<tr><td>${esc(r)}</td><td>${x.commits_sampled}/${x.commits_total} commits · verdict ${esc(x.verdict||'n/a')}${x.fast?' · <span class="warn">fast</span>':''}</td><td><a href="${b}${encodeURIComponent(x.zip.split('/').pop())}">zip</a> · <a href="${b}MANIFEST.json">manifest</a> · <a href="${b}VERDICT.json">verdict</a></td></tr>`}).join('');
-const pre=$('log');const atBottom=pre.scrollTop+pre.clientHeight>=pre.scrollHeight-8;pre.textContent=j.log.join('\n');if(atBottom)pre.scrollTop=pre.scrollHeight}}catch(e){}}
-cfg();setInterval(poll,2000);poll();
+ const isRef=p=>/^(github|gitlab|bitbucket|local):/.test(p)||p.includes('://')||p.startsWith('git@');
+ const pasted=$('paste').value.split('\n').map(s=>s.trim()).filter(Boolean).map(p=>p.startsWith('/')?'local:'+p:isRef(p)?p:(active==='local'?'github':active)+':'+p);
+ const repos=[...new Set([...selected,...pasted])];
+ try{const j=await api('/api/jobs',{repos,pct:+$('pct').value,min_commits:+$('minc').value,branch:$('branch').value,terms:$('terms').value.split(',').map(s=>s.trim()).filter(Boolean),fast:$('fast').checked});openJob=j.id;poll()}
+ catch(e){$('runmsg').textContent=e.message}};
+async function poll(){try{const js=await api('/api/jobs');$('jobs').tBodies[0].innerHTML=js.map(j=>`<tr><td><a href="#" data-j="${esc(j.id)}">${esc(j.id)}</a></td><td>${esc(j.status)}</td><td>${j.repos.length}</td><td>${j.fast?'<span class="warn">fast</span>':'full'} · ${j.pct}%</td></tr>`).join('');
+ QA('[data-j]').forEach(a=>a.onclick=e=>{e.preventDefault();openJob=a.dataset.j;poll()});
+ if(openJob){const j=await api('/api/jobs/'+openJob);$('detail').hidden=false;$('dtitle').textContent=j.id+' — '+j.status;
+ $('results').innerHTML='<tr><th>Repo</th><th>Result</th><th>Files</th></tr>'+j.repos.map(r=>{const x=j.results[r];if(!x)return`<tr><td>${esc(r)}</td><td>${j.status==='queued'?'queued':'…'}</td><td></td></tr>`;
+ if(!x.ok)return`<tr><td>${esc(r)}</td><td class="err">${esc(x.error)}</td><td></td></tr>`;
+ const b=`/download/${encodeURIComponent(j.id)}/${encodeURIComponent(x.slug)}/`;
+ return`<tr><td>${esc(r)}</td><td>${x.commits_sampled}/${x.commits_total} commits · verdict ${esc(x.verdict||'n/a')}${x.fast?' · <span class="warn">fast</span>':''}</td><td><a href="${b}${encodeURIComponent(x.zip.split('/').pop())}">zip</a> · <a href="${b}MANIFEST.json">manifest</a> · <a href="${b}VERDICT.json">verdict</a></td></tr>`}).join('');
+ const pre=$('log');const atBottom=pre.scrollTop+pre.clientHeight>=pre.scrollHeight-8;pre.textContent=j.log.join('\n');if(atBottom)pre.scrollTop=pre.scrollHeight}}catch(e){}}
+drawTabs();showPanel();drawSel();cfg();setInterval(poll,2000);poll();
 </script></body></html>

@@ -189,7 +189,7 @@ def make_handler(mgr: Manager, port: int):
                     return self._json(200, scan_local(str(body.get("path", "")).strip()))
                 if self.path == "/api/credentials":
                     if body.get("clear"):
-                        mgr.tokens.clear()
+                        mgr.tokens.clear(body["clear"] if body["clear"] in bridge.PLATFORMS else None)
                     else:
                         mgr.tokens.set(**{k: str(body.get(k) or "") for k in
                                           ("github", "gitlab", "bitbucket", "bitbucket_email")})

@@ -109,8 +109,13 @@ class Tokens:
             if value:
                 setattr(self, name, value)
 
-    def clear(self) -> None:
-        self.github = self.gitlab = self.bitbucket = self.bitbucket_email = ""
+    def clear(self, platform: Optional[str] = None) -> None:
+        """Forget one platform's credentials (bitbucket also drops its email), or all."""
+        names = {"github": ["github"], "gitlab": ["gitlab"],
+                 "bitbucket": ["bitbucket", "bitbucket_email"]}.get(platform or "") or \
+            ["github", "gitlab", "bitbucket", "bitbucket_email"]
+        for n in names:
+            setattr(self, n, "")
 
     def for_platform(self, platform: str) -> str:
         return {"github": self.github, "gitlab": self.gitlab, "bitbucket": self.bitbucket}[platform]

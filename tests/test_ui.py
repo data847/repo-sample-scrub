@@ -84,6 +84,10 @@ class UiTest(unittest.TestCase):
             # a blank field must not wipe another platform's credential
             self.req("/api/credentials", {"gitlab": "glpat-abcdefghijk"})
             self.assertTrue(self.mgr.tokens.github and self.mgr.tokens.gitlab)
+            # clearing one platform leaves the other alone
+            self.req("/api/credentials", {"clear": "github"})
+            self.assertFalse(self.mgr.tokens.github)
+            self.assertTrue(self.mgr.tokens.gitlab)
         finally:
             self.req("/api/credentials", {"clear": True})
         self.assertEqual(json.loads(self.req("/api/config")[1])["tokens"],
