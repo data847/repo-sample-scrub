@@ -1,0 +1,5 @@
+# The CLI/UI process imports codebase-profiler for repo listing and cloning, so
+# it needs that project's requirements (requests, PyJWT, pyyaml, ...):
+#   pip install -r <codebase-profiler>/requirements.txt
+# The scrub itself runs as a subprocess in repo-pii-scrub's own venv.
+# This package adds no dependencies of its own (stdlib only).

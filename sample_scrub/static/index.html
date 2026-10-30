@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sample &amp; Scrub</title>
+<style>
+:root{--bg:#f7f7f5;--fg:#1c1c1a;--mut:#6b6b66;--card:#fff;--line:#deded8;--acc:#2f5fd0;--ok:#1a7f4b;--bad:#b3261e;--warn:#9a6700}
+@media (prefers-color-scheme:dark){:root{--bg:#161615;--fg:#ecece8;--mut:#9a9a93;--card:#1f1f1d;--line:#34342f;--acc:#7da2ff;--ok:#4cc38a;--bad:#ff8a80;--warn:#e3b341}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,sans-serif}
+main{max-width:980px;margin:0 auto;padding:20px 16px 60px}
+h1{font-size:20px;margin:0 0 4px}p.sub{color:var(--mut);margin:0 0 18px}
+section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+h2{font-size:14px;margin:0 0 12px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--mut)}
+input,select,button{font:inherit;padding:7px 10px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+button{cursor:pointer;background:var(--acc);color:#fff;border-color:var(--acc)}button.sec{background:var(--bg);color:var(--fg);border-color:var(--line)}
+button:disabled{opacity:.5;cursor:default}
+.badges span{display:inline-block;padding:2px 8px;border-radius:99px;border:1px solid var(--line);margin-right:6px;font-size:12px}
+.on{color:var(--ok)}.off{color:var(--bad)}
+#repos{max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:7px;margin-top:10px}
+#repos label{flex-direction:row;align-items:center;gap:8px;padding:5px 10px;color:var(--fg);font-size:13px;border-bottom:1px solid var(--line)}
+table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);font-size:13px}
+pre{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:10px;max-height:300px;overflow:auto;font-size:12px;white-space:pre-wrap;margin:8px 0 0}
+.warn{color:var(--warn)}.err{color:var(--bad)}a{color:var(--acc)}
+</style></head><body><main>
+<h1>Sample &amp; Scrub</h1>
+<p class="sub">Restate a repo to its first N% of commits, then redact it with the PII pipeline. GitHub, GitLab and Bitbucket.</p>
+
+<section><h2>Setup</h2><div class="badges" id="cfg">loading…</div></section>
+
+<section><h2>1 · Pick repos</h2>
+<div class="row">
+<label>Platform<select id="platform"><option>github</option><option>gitlab</option><option>bitbucket</option></select></label>
+<label id="ownerlbl">Org / group / workspace<input id="owner" placeholder="my-org"></label>
+<label>Self-hosted host (optional)<input id="host" placeholder="gitlab.example.com"></label>
+<button id="listbtn">List repos</button>
+</div>
+<div class="row" style="margin-top:10px">
+<label style="flex:1">…or paste repos (one per line: owner/repo, platform:owner/repo, or URL)<textarea id="paste" rows="2" style="font:inherit;padding:7px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--fg)"></textarea></label></div>
+<div id="listmsg" class="warn"></div>
+<div id="repos" hidden></div>
+<div class="row" id="selrow" hidden style="margin-top:8px"><button class="sec" id="all">Select all</button><button class="sec" id="none">None</button><span id="count" class="sub"></span></div>
+</section>
+
+<section><h2>2 · Options</h2><div class="row">
+<label>% of commits<input id="pct" type="number" value="5" min="0.1" max="100" step="0.5" style="width:90px"></label>
+<label>Min commits<input id="minc" type="number" value="20" min="1" style="width:90px"></label>
+<label>Branch (default branch if empty)<input id="branch" placeholder="main"></label>
+<label style="flex:1">Brand / org terms (comma separated)<input id="terms" placeholder="AcmeCorp, Acme Ltd"></label>
+<label style="flex-direction:row;align-items:center;gap:6px;color:var(--fg)"><input type="checkbox" id="fast"> Fast (regex only)</label>
+</div>
+<p id="fastwarn" class="warn" hidden>Fast mode skips NER and the brand pass: names, brands and company names in code and commit messages are NOT redacted. Not fit for delivery.</p>
+<div class="row" style="margin-top:12px"><button id="run">Sample &amp; scrub selected</button><span id="runmsg" class="err"></span></div>
+</section>
+
+<section><h2>3 · Jobs</h2><table id="jobs"><thead><tr><th>Job</th><th>Status</th><th>Repos</th><th>Mode</th><th></th></tr></thead><tbody></tbody></table>
+<div id="detail" hidden><h2 style="margin-top:16px" id="dtitle"></h2><table id="results"></table><pre id="log"></pre></div></section>
+</main>
+<script>
+const $=id=>document.getElementById(id);let selected=new Set(),openJob=null;
+const api=async(p,b)=>{const r=await fetch(p,b?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}:{});const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);return j};
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function cfg(){try{const c=await api('/api/config');const b=(ok,t)=>`<span class="${ok?'on':'off'}">${ok?'●':'○'} ${t}</span>`;
+$('cfg').innerHTML=b(c.tokens.github,'GitHub token')+b(c.tokens.gitlab,'GitLab token')+b(c.tokens.bitbucket,'Bitbucket token'+(c.tokens.bitbucket&&!c.bitbucket_email?' (no email: access-token mode)':''))+b(c.profiler,'codebase-profiler')+b(c.pii_scrub,'repo-pii-scrub')+b(c.salt,'REPO_SANITIZER_SALT')+`<span>outputs: ${esc(c.outputs)}</span>`}catch(e){$('cfg').textContent=e.message}}
+$('platform').onchange=()=>{$('ownerlbl').firstChild.textContent=({github:'Org / user',gitlab:'Group',bitbucket:'Workspace slug'})[$('platform').value]};
+$('fast').onchange=()=>$('fastwarn').hidden=!$('fast').checked;
+function count(){$('count').textContent=selected.size+' selected'}
+$('listbtn').onclick=async()=>{$('listmsg').textContent='';$('listbtn').disabled=true;try{
+const rs=await api('/api/list',{platform:$('platform').value,owner:$('owner').value,host:$('host').value});
+$('repos').hidden=$('selrow').hidden=false;$('repos').innerHTML=rs.map(r=>`<label><input type="checkbox" value="${esc(r.ref)}"> ${esc(r.name)} <span class="sub">${esc(r.branch)}</span></label>`).join('')||'<p class="sub" style="padding:8px">No repos.</p>';
+$('repos').querySelectorAll('input').forEach(i=>i.onchange=()=>{i.checked?selected.add(i.value):selected.delete(i.value);count()});selected.clear();count()}
+catch(e){$('listmsg').textContent=e.message}$('listbtn').disabled=false};
+$('all').onclick=()=>$('repos').querySelectorAll('input').forEach(i=>{i.checked=true;selected.add(i.value)})||count();
+$('none').onclick=()=>{$('repos').querySelectorAll('input').forEach(i=>i.checked=false);selected.clear();count()};
+$('run').onclick=async()=>{$('runmsg').textContent='';
+const pasted=$('paste').value.split('\n').map(s=>s.trim()).filter(Boolean);
+const repos=[...new Set([...selected,...pasted.map(p=>/^(github|gitlab|bitbucket):/.test(p)||p.includes('://')||p.startsWith('git@')?p:$('platform').value+':'+p)])];
+try{const j=await api('/api/jobs',{repos,pct:+$('pct').value,min_commits:+$('minc').value,branch:$('branch').value,terms:$('terms').value.split(',').map(s=>s.trim()).filter(Boolean),fast:$('fast').checked});openJob=j.id;poll()}
+catch(e){$('runmsg').textContent=e.message}};
+async function poll(){try{const js=await api('/api/jobs');$('jobs').tBodies[0].innerHTML=js.map(j=>`<tr><td><a href="#" data-j="${esc(j.id)}">${esc(j.id)}</a></td><td>${esc(j.status)}</td><td>${j.repos.length}</td><td>${j.fast?'<span class="warn">fast</span>':'full'} · ${j.pct}%</td><td></td></tr>`).join('');
+document.querySelectorAll('[data-j]').forEach(a=>a.onclick=e=>{e.preventDefault();openJob=a.dataset.j;poll()});
+if(openJob){const j=await api('/api/jobs/'+openJob);$('detail').hidden=false;$('dtitle').textContent=j.id+' — '+j.status;
+$('results').innerHTML='<tr><th>Repo</th><th>Result</th><th>Files</th></tr>'+j.repos.map(r=>{const x=j.results[r];if(!x)return`<tr><td>${esc(r)}</td><td>${j.status==='queued'?'queued':'…'}</td><td></td></tr>`;
+if(!x.ok)return`<tr><td>${esc(r)}</td><td class="err">${esc(x.error)}</td><td></td></tr>`;
+const b=`/download/${encodeURIComponent(j.id)}/${encodeURIComponent(x.slug)}/`;
+return`<tr><td>${esc(r)}</td><td>${x.commits_sampled}/${x.commits_total} commits · verdict ${esc(x.verdict||'n/a')}${x.fast?' · <span class="warn">fast</span>':''}</td><td><a href="${b}${encodeURIComponent(x.zip.split('/').pop())}">zip</a> · <a href="${b}MANIFEST.json">manifest</a> · <a href="${b}VERDICT.json">verdict</a></td></tr>`}).join('');
+const pre=$('log');const atBottom=pre.scrollTop+pre.clientHeight>=pre.scrollHeight-8;pre.textContent=j.log.join('\n');if(atBottom)pre.scrollTop=pre.scrollHeight}}catch(e){}}
+cfg();setInterval(poll,2000);poll();
+</script></body></html>
