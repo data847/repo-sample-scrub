@@ -72,6 +72,45 @@ class UiTest(unittest.TestCase):
         self.assertIn(self.req("/download/../acme__api/x_sanitized.zip")[0], (400, 404))
         self.assertIn(self.req("/download/job-1/../job-1/x_sanitized.zip")[0], (400, 404))
 
+    def test_credentials_are_memory_only_and_never_echoed(self):
+        secret = "ghp_SUPERSECRETVALUE1234567890"
+        try:
+            code, body = self.req("/api/credentials", {"github": secret, "bitbucket_email": "a@b.co"})
+            self.assertEqual(code, 200)
+            self.assertNotIn(secret.encode(), body)
+            self.assertEqual(json.loads(body)["tokens"]["github"], True)
+            self.assertNotIn(secret.encode(), self.req("/api/config")[1])
+            self.assertEqual(self.mgr.tokens.redact(f"x {secret} y"), "x *** y")
+            # a blank field must not wipe another platform's credential
+            self.req("/api/credentials", {"gitlab": "glpat-abcdefghijk"})
+            self.assertTrue(self.mgr.tokens.github and self.mgr.tokens.gitlab)
+        finally:
+            self.req("/api/credentials", {"clear": True})
+        self.assertEqual(json.loads(self.req("/api/config")[1])["tokens"],
+                         {"github": False, "gitlab": False, "bitbucket": False})
+
+    def test_scan_local_path(self):
+        import subprocess
+        base = Path(self.tmp.name) / "repos"
+        for n in ("a", "b"):
+            (base / n).mkdir(parents=True)
+            subprocess.run(["git", "init", "-q", str(base / n)], check=True)
+        (base / "notrepo").mkdir()
+        code, body = self.req("/api/scan", {"path": str(base)})
+        self.assertEqual(code, 200)
+        self.assertEqual([r["name"] for r in json.loads(body)], ["a", "b"])
+        self.assertTrue(all(r["ref"].startswith("local:/") for r in json.loads(body)))
+        one = json.loads(self.req("/api/scan", {"path": str(base / "a")})[1])
+        self.assertEqual([r["name"] for r in one], ["a"])
+        self.assertEqual(self.req("/api/scan", {"path": "relative/dir"})[0], 400)
+        self.assertEqual(self.req("/api/scan", {"path": str(base / "missing")})[0], 400)
+
+    def test_local_repo_validation(self):
+        with self.assertRaises(Exception):
+            ui.local_repo("relative")
+        with self.assertRaises(Exception):
+            ui.local_repo(self.tmp.name)  # exists but is not a git repo
+
 
 if __name__ == "__main__":
     unittest.main()

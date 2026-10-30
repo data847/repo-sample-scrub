@@ -26,12 +26,25 @@ pre{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:
 
 <section><h2>Setup</h2><div class="badges" id="cfg">loading…</div></section>
 
+<section><h2>Credentials <span style="text-transform:none;letter-spacing:0">(kept in server memory only; never saved, logged or shown again)</span></h2>
+<div class="row">
+<label>GitHub token<input id="t_github" type="password" autocomplete="off" placeholder="ghp_…"></label>
+<label>GitLab token<input id="t_gitlab" type="password" autocomplete="off" placeholder="glpat-…"></label>
+<label>Bitbucket token<input id="t_bitbucket" type="password" autocomplete="off" placeholder="ATATT… or access token"></label>
+<label>Bitbucket email (scoped tokens only)<input id="t_bbemail" type="email" autocomplete="off" placeholder="you@example.com"></label>
+<button id="savecreds">Save</button><button class="sec" id="clearcreds">Clear all</button>
+</div><div id="credmsg" class="sub"></div></section>
+
 <section><h2>1 · Pick repos</h2>
 <div class="row">
 <label>Platform<select id="platform"><option>github</option><option>gitlab</option><option>bitbucket</option></select></label>
 <label id="ownerlbl">Org / group / workspace<input id="owner" placeholder="my-org"></label>
 <label>Self-hosted host (optional)<input id="host" placeholder="gitlab.example.com"></label>
 <button id="listbtn">List repos</button>
+</div>
+<div class="row" style="margin-top:10px">
+<label style="flex:1">Local path: a repo, or a folder containing repos (absolute path)<input id="localpath" placeholder="/Users/me/repos"></label>
+<button class="sec" id="scanbtn">Scan path</button>
 </div>
 <div class="row" style="margin-top:10px">
 <label style="flex:1">…or paste repos (one per line: owner/repo, platform:owner/repo, or URL)<textarea id="paste" rows="2" style="font:inherit;padding:7px;border-radius:7px;border:1px solid var(--line);background:var(--bg);color:var(--fg)"></textarea></label></div>
@@ -63,16 +76,22 @@ $('cfg').innerHTML=b(c.tokens.github,'GitHub token')+b(c.tokens.gitlab,'GitLab t
 $('platform').onchange=()=>{$('ownerlbl').firstChild.textContent=({github:'Org / user',gitlab:'Group',bitbucket:'Workspace slug'})[$('platform').value]};
 $('fast').onchange=()=>$('fastwarn').hidden=!$('fast').checked;
 function count(){$('count').textContent=selected.size+' selected'}
-$('listbtn').onclick=async()=>{$('listmsg').textContent='';$('listbtn').disabled=true;try{
-const rs=await api('/api/list',{platform:$('platform').value,owner:$('owner').value,host:$('host').value});
-$('repos').hidden=$('selrow').hidden=false;$('repos').innerHTML=rs.map(r=>`<label><input type="checkbox" value="${esc(r.ref)}"> ${esc(r.name)} <span class="sub">${esc(r.branch)}</span></label>`).join('')||'<p class="sub" style="padding:8px">No repos.</p>';
+function showRepos(rs){
+$('repos').hidden=$('selrow').hidden=false;$('repos').innerHTML=rs.map(r=>`<label><input type="checkbox" value="${esc(r.ref)}"> ${esc(r.name)} <span class="sub">${esc(r.branch)}</span></label>`).join('')||'<p class="sub" style="padding:8px">No repos found (local scan looks only one level down).</p>';
 $('repos').querySelectorAll('input').forEach(i=>i.onchange=()=>{i.checked?selected.add(i.value):selected.delete(i.value);count()});selected.clear();count()}
+$('listbtn').onclick=async()=>{$('listmsg').textContent='';$('listbtn').disabled=true;try{
+showRepos(await api('/api/list',{platform:$('platform').value,owner:$('owner').value,host:$('host').value}))}
 catch(e){$('listmsg').textContent=e.message}$('listbtn').disabled=false};
+$('scanbtn').onclick=async()=>{$('listmsg').textContent='';try{showRepos(await api('/api/scan',{path:$('localpath').value}))}catch(e){$('listmsg').textContent=e.message}};
+async function creds(b){try{await api('/api/credentials',b);['t_github','t_gitlab','t_bitbucket','t_bbemail'].forEach(i=>$(i).value='');$('credmsg').textContent=b.clear?'Cleared.':'Saved in memory.';cfg()}catch(e){$('credmsg').textContent=e.message}}
+$('savecreds').onclick=()=>creds({github:$('t_github').value,gitlab:$('t_gitlab').value,bitbucket:$('t_bitbucket').value,bitbucket_email:$('t_bbemail').value});
+$('clearcreds').onclick=()=>creds({clear:true});
 $('all').onclick=()=>$('repos').querySelectorAll('input').forEach(i=>{i.checked=true;selected.add(i.value)})||count();
 $('none').onclick=()=>{$('repos').querySelectorAll('input').forEach(i=>i.checked=false);selected.clear();count()};
 $('run').onclick=async()=>{$('runmsg').textContent='';
 const pasted=$('paste').value.split('\n').map(s=>s.trim()).filter(Boolean);
-const repos=[...new Set([...selected,...pasted.map(p=>/^(github|gitlab|bitbucket):/.test(p)||p.includes('://')||p.startsWith('git@')?p:$('platform').value+':'+p)])];
+const isRef=p=>/^(github|gitlab|bitbucket|local):/.test(p)||p.includes('://')||p.startsWith('git@');
+const repos=[...new Set([...selected,...pasted.map(p=>p.startsWith('/')?'local:'+p:isRef(p)?p:$('platform').value+':'+p)])];
 try{const j=await api('/api/jobs',{repos,pct:+$('pct').value,min_commits:+$('minc').value,branch:$('branch').value,terms:$('terms').value.split(',').map(s=>s.trim()).filter(Boolean),fast:$('fast').checked});openJob=j.id;poll()}
 catch(e){$('runmsg').textContent=e.message}};
 async function poll(){try{const js=await api('/api/jobs');$('jobs').tBodies[0].innerHTML=js.map(j=>`<tr><td><a href="#" data-j="${esc(j.id)}">${esc(j.id)}</a></td><td>${esc(j.status)}</td><td>${j.repos.length}</td><td>${j.fast?'<span class="warn">fast</span>':'full'} · ${j.pct}%</td><td></td></tr>`).join('');

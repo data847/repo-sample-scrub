@@ -101,6 +101,17 @@ class Tokens:
         self.bitbucket = get("BITBUCKET_TOKEN", "bitbucket_token")
         self.bitbucket_email = get("BITBUCKET_EMAIL", "bitbucket_email")
 
+    def set(self, **fields: str) -> None:
+        """Replace credentials held in memory (UI entry). Blank values are ignored,
+        so submitting one platform does not wipe the others. Never persisted."""
+        for name in ("github", "gitlab", "bitbucket", "bitbucket_email"):
+            value = (fields.get(name) or "").strip()
+            if value:
+                setattr(self, name, value)
+
+    def clear(self) -> None:
+        self.github = self.gitlab = self.bitbucket = self.bitbucket_email = ""
+
     def for_platform(self, platform: str) -> str:
         return {"github": self.github, "gitlab": self.gitlab, "bitbucket": self.bitbucket}[platform]
 

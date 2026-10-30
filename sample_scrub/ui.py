@@ -1,8 +1,9 @@
 """Local web UI (stdlib only): pick repos from GitHub / GitLab / Bitbucket, run
 the sample + scrub pipeline in a background queue, watch logs, download zips.
 
-Binds to 127.0.0.1. Credentials come from the environment / .env, never the
-browser. Requests must carry a loopback Host header and (for POST) a JSON
+Binds to 127.0.0.1. Credentials come from the environment / .env or are typed
+into the UI; UI-entered ones live in server memory only (never written to disk,
+logged or sent back to the browser). Requests must carry a loopback Host header and (for POST) a JSON
 content type, which blocks DNS-rebinding and cross-site form posts.
 """
 
@@ -22,6 +23,29 @@ from . import bridge, config, pipeline
 STATIC = Path(__file__).parent / "static"
 DOWNLOADABLE = {"RESULT.json", "MANIFEST.json", "VERDICT.json", "SAMPLE_MANIFEST.json"}
 SAFE = re.compile(r"^[\w.\-]+$")
+
+
+def local_repo(path: str) -> Path:
+    p = Path(path).expanduser()
+    if not p.is_absolute():
+        raise bridge.BridgeError(f"local path must be absolute: {path}")
+    p = p.resolve()
+    if not (p / ".git").exists():
+        raise bridge.BridgeError(f"not a git repository: {p}")
+    return p
+
+
+def scan_local(path: str) -> List[dict]:
+    """The path itself if it is a repo, else the git repos directly inside it."""
+    p = Path(path).expanduser()
+    if not p.is_absolute():
+        raise bridge.BridgeError(f"path must be absolute: {path}")
+    p = p.resolve()
+    if not p.is_dir():
+        raise bridge.BridgeError(f"not a directory: {p}")
+    found = [p] if (p / ".git").exists() else sorted(
+        c for c in p.iterdir() if c.is_dir() and not c.name.startswith(".") and (c / ".git").exists())
+    return [{"ref": f"local:{c}", "name": c.name, "branch": str(c)} for c in found]
 
 
 class Job:
@@ -68,8 +92,11 @@ class Manager:
             failed = 0
             for text in job.repos:
                 try:
-                    ref = bridge.parse_repo(text)
-                    res = pipeline.run_repo(ref, None, job.id, job.opts, self.tokens, job.add)
+                    if text.startswith("local:"):
+                        ref, local = None, local_repo(text[len("local:"):])
+                    else:
+                        ref, local = bridge.parse_repo(text), None
+                    res = pipeline.run_repo(ref, local, job.id, job.opts, self.tokens, job.add)
                     job.results[text] = {"ok": True, **res}
                 except Exception as exc:
                     failed += 1
@@ -158,6 +185,16 @@ def make_handler(mgr: Manager, port: int):
                                               mgr.tokens, str(body.get("host", "")).strip())
                     return self._json(200, [{"ref": f"{r.platform}:{r.full_name}", "name": r.full_name,
                                              "branch": r.default_branch} for r in repos])
+                if self.path == "/api/scan":
+                    return self._json(200, scan_local(str(body.get("path", "")).strip()))
+                if self.path == "/api/credentials":
+                    if body.get("clear"):
+                        mgr.tokens.clear()
+                    else:
+                        mgr.tokens.set(**{k: str(body.get(k) or "") for k in
+                                          ("github", "gitlab", "bitbucket", "bitbucket_email")})
+                    return self._json(200, {"tokens": mgr.tokens.available(),
+                                            "bitbucket_email": bool(mgr.tokens.bitbucket_email)})
                 if self.path == "/api/jobs":
                     repos = [str(r) for r in body.get("repos", []) if str(r).strip()]
                     if not repos:

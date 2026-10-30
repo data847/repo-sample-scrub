@@ -43,9 +43,12 @@ git submodule add https://github.com/data847/repo-pii-scrub     vendor/repo-pii-
 ## Tokens
 
 Credentials come from the environment (or a `.env` in the working directory, or a
-profiler-style `--tokens-file`). They are **never** entered in the UI and never
-written to outputs; they are redacted from logs and removed from the retained
-clone's `origin` URL.
+profiler-style `--tokens-file`), or can be typed into the UI's **Credentials**
+panel. UI-entered credentials live in the server process's memory only: they are
+never written to disk, never returned by the API (the page only learns which
+platforms have one) and are cleared when the server stops (or with "Clear all").
+In every case they are redacted from logs, never written to outputs, and removed
+from the retained clone's `origin` URL.
 
 | Platform | Variable | Notes |
 |----------|----------|-------|
@@ -91,7 +94,9 @@ in a string literal survives. Always check a delivery with a normal run.
 
 ### The UI
 
-Pick a platform, list an org / group / workspace (or paste repos), tick the ones you
+Enter credentials in the Credentials panel (or set them in the environment), then
+pick a platform and list an org / group / workspace, **or** give a local path (one
+repo, or a folder to scan for repos), **or** paste repos; tick the ones you
 want, set the percentage and brand terms, and run. Jobs queue and run one at a
 time (the full scrub loads a large NER model). Logs stream live; each finished repo
 links its zip, manifest and verdict. The server binds `127.0.0.1` only, rejects
