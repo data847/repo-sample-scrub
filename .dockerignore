@@ -1,0 +1,12 @@
+.git
+.gitignore
+outputs
+clones
+vendor
+repos
+tests
+**/__pycache__
+*.pyc
+.env
+tokens
+*.zip

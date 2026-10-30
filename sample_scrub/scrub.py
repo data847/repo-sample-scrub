@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -35,6 +36,16 @@ def _run(label: str, cmd: List[str], env: dict, log: Callable[[str], None], reda
     return "".join(lines)
 
 
+def drop_unscrubbed_source(run_dir: Path) -> None:
+    """repo-pii-scrub keeps its Gate-1 copy of the input under <run>/source. That is
+    the un-scrubbed sample, so it must not outlive the run (it is reproducible)."""
+    src = Path(run_dir) / "source"
+    if src.is_symlink():
+        src.unlink()
+    elif src.exists():
+        shutil.rmtree(src, ignore_errors=True)
+
+
 def scrub(sample_dir: Path, slug: str, run_id: str, terms: List[str], fast: bool,
           log: Callable[[str], None] = print, redact=lambda s: s) -> dict:
     """Scrub sample_dir. Returns {run_dir, zip, manifest, verdict} paths (verdict may be None)."""
@@ -45,7 +56,7 @@ def scrub(sample_dir: Path, slug: str, run_id: str, terms: List[str], fast: bool
     py = str(venv_py if venv_py.exists() else sys.executable)
     orch = str(skill / "scripts" / "orchestrator.py")
     env = _env(skill)
-    if not fast and not env.get("REPO_SANITIZER_SALT"):
+    if not env.get("REPO_SANITIZER_SALT", "").strip():  # required by the orchestrator in every mode
         raise ScrubError("REPO_SANITIZER_SALT is not set (needed for deterministic pseudonyms)")
 
     init = [py, orch, "init", "--run-id", run_id, "--repo-slug", slug, "--source", str(sample_dir)]
@@ -54,22 +65,25 @@ def scrub(sample_dir: Path, slug: str, run_id: str, terms: List[str], fast: bool
     out = _run("init", init, env, log, redact)
     run_dir = json.loads(out[out.index("{"):out.rindex("}") + 1])["run_dir"]
 
-    _run("clone", [py, orch, "clone", "--run-dir", run_dir], env, log, redact)
-    _run("sanitize", [py, orch, "sanitize", "--run-dir", run_dir, "--pre-scan"], env, log, redact)
-    if not fast:
-        bm = [py, orch, "brand-map", "--run-dir", run_dir]
-        for t in terms:
-            bm += ["--term", t]
-        _run("brand-map", bm, env, log, redact)
-    _run("package", [py, orch, "package", "--run-dir", run_dir], env, log, redact)
+    try:
+        _run("clone", [py, orch, "clone", "--run-dir", run_dir], env, log, redact)
+        _run("sanitize", [py, orch, "sanitize", "--run-dir", run_dir, "--pre-scan"], env, log, redact)
+        if not fast:
+            bm = [py, orch, "brand-map", "--run-dir", run_dir]
+            for t in terms:
+                bm += ["--term", t]
+            _run("brand-map", bm, env, log, redact)
+        _run("package", [py, orch, "package", "--run-dir", run_dir], env, log, redact)
 
-    verdict = None
-    verify = skill / "scripts" / "verify_deliverable.py"
-    if verify.exists():
-        _run("verify", [py, str(verify), "--run-dir", run_dir], env, log, redact)
-        verdict = Path(run_dir) / "VERDICT.json"
-    else:
-        log("verify_deliverable.py not present in this repo-pii-scrub copy; skipping acceptance gate")
+        verdict = None
+        verify = skill / "scripts" / "verify_deliverable.py"
+        if verify.exists():
+            _run("verify", [py, str(verify), "--run-dir", run_dir], env, log, redact)
+            verdict = Path(run_dir) / "VERDICT.json"
+        else:
+            log("verify_deliverable.py not present in this repo-pii-scrub copy; skipping acceptance gate")
+    finally:
+        drop_unscrubbed_source(Path(run_dir))
     zips = sorted(Path(run_dir).glob("*_sanitized.zip"))
     if not zips:
         raise ScrubError("package produced no *_sanitized.zip")

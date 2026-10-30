@@ -53,6 +53,15 @@ class UiTest(unittest.TestCase):
 
     def test_rebinding_host_rejected(self):
         self.assertEqual(self.req("/api/config", host="evil.example.com")[0], 403)
+        self.assertEqual(self.req("/api/config", host="evil.example.com:8795")[0], 403)
+        self.assertEqual(self.req("/api/config", host="127.0.0.1.evil.com")[0], 403)
+
+    def test_loopback_host_on_a_different_port_is_fine(self):
+        # docker -p 9000:8795 makes the browser send Host: localhost:9000
+        self.assertEqual(self.req("/api/config", host="localhost:9000")[0], 200)
+
+    def test_config_reports_local_roots(self):
+        self.assertEqual(json.loads(self.req("/api/config")[1])["local_roots"], [])
 
     def test_post_needs_json(self):
         self.assertEqual(self.req("/api/jobs", {"repos": ["a/b"]}, ctype="text/plain")[0], 415)

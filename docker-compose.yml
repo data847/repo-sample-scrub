@@ -1,0 +1,32 @@
+# docker compose up --build         -> http://127.0.0.1:8795
+#
+#   REPOS_DIR=~/code  folder of repos to expose on the "Local" tab (mounted read-only at /repos)
+#   PORT=8795         host port (always published on the host's loopback only)
+#   REPO_SANITIZER_SALT, GITHUB_TOKEN, GITLAB_TOKEN, BITBUCKET_TOKEN, BITBUCKET_EMAIL
+#                     optional; credentials can also be typed into the UI (memory only)
+services:
+  sample-scrub:
+    build:
+      context: .
+      additional_contexts:
+        # public GitHub by default; point at a local checkout to build from your own copy:
+        #   PROFILER_SRC=../codebase-profiler SCRUB_SRC=../skills/repo-pii-scrub
+        profiler-src: ${PROFILER_SRC:-https://github.com/lh2-tech/codebase-profiler.git#main}
+        scrub-src: ${SCRUB_SRC:-https://github.com/data847/repo-pii-scrub.git#main}
+    image: sample-scrub:local
+    ports:
+      - "127.0.0.1:${PORT:-8795}:8795"
+    environment:
+      REPO_SANITIZER_SALT: ${REPO_SANITIZER_SALT:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+      BITBUCKET_TOKEN: ${BITBUCKET_TOKEN:-}
+      BITBUCKET_EMAIL: ${BITBUCKET_EMAIL:-}
+    volumes:
+      - ${REPOS_DIR:-./repos}:/repos:ro
+      - ./outputs:/data/outputs
+      - ./clones:/data/clones
+      - hf-cache:/data/hf          # NER model cache, so normal mode downloads it once
+    restart: unless-stopped
+volumes:
+  hf-cache:

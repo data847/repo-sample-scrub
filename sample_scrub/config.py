@@ -56,6 +56,23 @@ def clones_root() -> Path:
     return Path("clones").resolve()
 
 
+def _split(value: str) -> list:
+    return [x.strip() for x in re.split(r"[,:;]" if os.name != "nt" else r"[,;]", value) if x.strip()]
+
+
+def local_roots() -> list:
+    """Directories the UI may read local repos from (SAMPLE_SCRUB_LOCAL_ROOTS,
+    comma/colon separated). Empty means unrestricted, which is only appropriate
+    when the server runs directly on your own machine; the Docker image pins it
+    to the bind-mounted /repos."""
+    return [Path(r).expanduser().resolve() for r in _split(os.environ.get("SAMPLE_SCRUB_LOCAL_ROOTS", ""))]
+
+
+def allowed_hostnames() -> set:
+    """Host-header hostnames accepted besides loopback (SAMPLE_SCRUB_ALLOWED_HOSTS)."""
+    return {h.lower() for h in _split(os.environ.get("SAMPLE_SCRUB_ALLOWED_HOSTS", ""))}
+
+
 def _first_existing(candidates) -> Optional[Path]:
     for c in candidates:
         if c and Path(c).is_dir():

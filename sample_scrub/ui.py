@@ -1,7 +1,7 @@
 """Local web UI (stdlib only): pick repos from GitHub / GitLab / Bitbucket, run
 the sample + scrub pipeline in a background queue, watch logs, download zips.
 
-Binds to 127.0.0.1. Credentials come from the environment / .env or are typed
+Binds to 127.0.0.1 by default (--bind 0.0.0.0 inside Docker). Credentials come from the environment / .env or are typed
 into the UI; UI-entered ones live in server memory only (never written to disk,
 logged or sent back to the browser). Requests must carry a loopback Host header and (for POST) a JSON
 content type, which blocks DNS-rebinding and cross-site form posts.
@@ -17,6 +17,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Dict, List, Optional
+from urllib.parse import urlsplit
 
 from . import bridge, config, pipeline
 
@@ -25,11 +26,25 @@ DOWNLOADABLE = {"RESULT.json", "MANIFEST.json", "VERDICT.json", "SAMPLE_MANIFEST
 SAFE = re.compile(r"^[\w.\-]+$")
 
 
+def _within_roots(p: Path) -> bool:
+    roots = config.local_roots()
+    return not roots or any(p == r or r in p.parents for r in roots)
+
+
+def _check_root(p: Path, original: str) -> None:
+    if not _within_roots(p):
+        roots = ", ".join(str(r) for r in config.local_roots())
+        raise bridge.BridgeError(
+            f"{original} is outside the allowed local folder(s): {roots}. "
+            "If this server runs in Docker, use the path as mounted inside the container.")
+
+
 def local_repo(path: str) -> Path:
     p = Path(path).expanduser()
     if not p.is_absolute():
         raise bridge.BridgeError(f"local path must be absolute: {path}")
     p = p.resolve()
+    _check_root(p, path)
     if not (p / ".git").exists():
         raise bridge.BridgeError(f"not a git repository: {p}")
     return p
@@ -41,10 +56,13 @@ def scan_local(path: str) -> List[dict]:
     if not p.is_absolute():
         raise bridge.BridgeError(f"path must be absolute: {path}")
     p = p.resolve()
+    _check_root(p, path)
     if not p.is_dir():
         raise bridge.BridgeError(f"not a directory: {p}")
+    # a child symlinked to somewhere outside the allowed roots must not be listed
     found = [p] if (p / ".git").exists() else sorted(
-        c for c in p.iterdir() if c.is_dir() and not c.name.startswith(".") and (c / ".git").exists())
+        c for c in p.iterdir() if c.is_dir() and not c.name.startswith(".")
+        and (c / ".git").exists() and _within_roots(c.resolve()))
     return [{"ref": f"local:{c}", "name": c.name, "branch": str(c)} for c in found]
 
 
@@ -106,8 +124,21 @@ class Manager:
             job.status = "failed" if failed == len(job.repos) else ("partial" if failed else "done")
 
 
+LOOPBACK = {"127.0.0.1", "localhost", "::1"}
+
+
+def host_allowed(header: str) -> bool:
+    """Accept loopback hostnames on any port (a Docker port mapping may differ from
+    the in-container port) and any hostname listed in SAMPLE_SCRUB_ALLOWED_HOSTS.
+    Anything else is refused, which is what blocks DNS-rebinding attacks."""
+    try:
+        name = (urlsplit("//" + header).hostname or "").lower()
+    except ValueError:
+        return False
+    return name in LOOPBACK or name in config.allowed_hostnames()
+
+
 def make_handler(mgr: Manager, port: int):
-    hosts = {f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"}
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):  # quiet
@@ -127,7 +158,7 @@ def make_handler(mgr: Manager, port: int):
             self._send(code, json.dumps(obj).encode())
 
         def _host_ok(self) -> bool:
-            if self.headers.get("Host", "") in hosts:
+            if host_allowed(self.headers.get("Host", "")):
                 return True
             self._json(403, {"error": "bad Host header"})
             return False
@@ -145,7 +176,8 @@ def make_handler(mgr: Manager, port: int):
                     "profiler": str(config.profiler_dir() or ""),
                     "pii_scrub": str(config.pii_scrub_dir() or ""),
                     "salt": bool(__import__("os").environ.get("REPO_SANITIZER_SALT")),
-                    "outputs": str(config.outputs_root())})
+                    "outputs": str(config.outputs_root()),
+                    "local_roots": [str(r) for r in config.local_roots()]})
             if path == "/api/jobs":
                 return self._json(200, [j.view() for j in sorted(mgr.jobs.values(), key=lambda j: -j.created)])
             m = re.match(r"^/api/jobs/([\w.\-]+)$", path)
@@ -199,6 +231,9 @@ def make_handler(mgr: Manager, port: int):
                     repos = [str(r) for r in body.get("repos", []) if str(r).strip()]
                     if not repos:
                         return self._json(400, {"error": "select at least one repo"})
+                    for r in repos:  # fail fast on a bad local path instead of after queueing
+                        if r.startswith("local:"):
+                            local_repo(r[len("local:"):])
                     pct = float(body.get("pct", 5))
                     if not 0 < pct <= 100:
                         return self._json(400, {"error": "pct must be in (0, 100]"})
@@ -217,10 +252,14 @@ def make_handler(mgr: Manager, port: int):
     return H
 
 
-def serve(port: int = 8795, tokens_file: Optional[str] = None) -> int:
+def serve(port: int = 8795, tokens_file: Optional[str] = None, bind: str = "127.0.0.1") -> int:
     mgr = Manager(config.Tokens(tokens_file))
-    srv = ThreadingHTTPServer(("127.0.0.1", port), make_handler(mgr, port))
-    print(f"sample-scrub UI on http://127.0.0.1:{port}  (outputs: {config.outputs_root()})", flush=True)
+    srv = ThreadingHTTPServer((bind, port), make_handler(mgr, port))
+    print(f"sample-scrub UI on http://{bind}:{port}  (outputs: {config.outputs_root()})", flush=True)
+    if bind not in ("127.0.0.1", "localhost", "::1"):
+        print("NOTE: bound beyond loopback and the UI has no login. Publish the port to the "
+              "host's loopback only (docker -p 127.0.0.1:PORT:PORT) and never expose it to a network.",
+              flush=True)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

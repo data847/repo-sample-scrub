@@ -48,6 +48,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     ui = sub.add_parser("ui", help="start the local web UI")
     ui.add_argument("--port", type=int, default=8795)
+    ui.add_argument("--bind", default="127.0.0.1",
+                    help="address to listen on (use 0.0.0.0 only inside a container, with the port "
+                         "published to the host's loopback)")
     ui.add_argument("--tokens-file")
     return p
 
@@ -56,7 +59,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     a = build_parser().parse_args(argv)
     if a.cmd == "ui":
         from . import ui
-        return ui.serve(a.port, a.tokens_file)
+        return ui.serve(a.port, a.tokens_file, a.bind)
 
     tokens = config.Tokens(a.tokens_file)
     try:

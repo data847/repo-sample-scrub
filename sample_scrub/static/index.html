@@ -71,6 +71,7 @@ pre{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:
  <div class="row"><label style="flex:1;min-width:280px">Absolute path: a repo, or a folder containing repos<input id="o_local" placeholder="/Users/me/repos"></label>
   <button data-list="local">Scan path</button></div>
  <div class="sub" style="margin-top:6px">Local repos need no credentials. The scan looks one level down and the repo must be a full (not partial) clone.</div>
+ <div id="rootsnote" class="sub" style="margin-top:6px" hidden></div>
 </div>
 
 <div id="listmsg" class="warn" style="margin-top:8px"></div>
@@ -124,6 +125,7 @@ $('clearsel').onclick=()=>{selected.clear();drawList();drawSel()};
 
 async function cfg(){try{const c=await api('/api/config');tokens=c.tokens;const b=(ok,t)=>`<span class="${ok?'on':'off'}">${ok?'●':'○'} ${t}</span>`;
  $('cfg').innerHTML=b(c.profiler,'codebase-profiler')+b(c.pii_scrub,'repo-pii-scrub')+b(c.salt,'REPO_SANITIZER_SALT')+`<span>outputs: ${esc(c.outputs)}</span>`;
+ const rn=$('rootsnote');rn.hidden=!c.local_roots.length;if(c.local_roots.length){rn.innerHTML='Only these folders are readable (mounted into the server): <b>'+c.local_roots.map(esc).join(', ')+'</b>. Type the path as the server sees it, not your host path.';if(!$('o_local').value)$('o_local').value=c.local_roots[0]}
  for(const k of ['github','gitlab','bitbucket'])$('cm_'+k).textContent=c.tokens[k]?'● token set':'○ no token';drawTabs()}catch(e){$('cfg').textContent=e.message}}
 async function creds(b){try{await api('/api/credentials',b);QA('.creds input').forEach(i=>i.value='');await cfg()}catch(e){$('listmsg').textContent=e.message}}
 QA('[data-save]').forEach(b=>b.onclick=()=>{const k=b.dataset.save,body={};body[k]=$('t_'+k).value;if(k==='bitbucket')body.bitbucket_email=$('t_bitbucket_email').value;creds(body)});
@@ -145,7 +147,7 @@ async function poll(){try{const js=await api('/api/jobs');$('jobs').tBodies[0].i
  $('results').innerHTML='<tr><th>Repo</th><th>Result</th><th>Files</th></tr>'+j.repos.map(r=>{const x=j.results[r];if(!x)return`<tr><td>${esc(r)}</td><td>${j.status==='queued'?'queued':'…'}</td><td></td></tr>`;
  if(!x.ok)return`<tr><td>${esc(r)}</td><td class="err">${esc(x.error)}</td><td></td></tr>`;
  const b=`/download/${encodeURIComponent(j.id)}/${encodeURIComponent(x.slug)}/`;
- return`<tr><td>${esc(r)}</td><td>${x.commits_sampled}/${x.commits_total} commits · verdict ${esc(x.verdict||'n/a')}${x.fast?' · <span class="warn">fast</span>':''}</td><td><a href="${b}${encodeURIComponent(x.zip.split('/').pop())}">zip</a> · <a href="${b}MANIFEST.json">manifest</a> · <a href="${b}VERDICT.json">verdict</a></td></tr>`}).join('');
+ return`<tr><td>${esc(r)}</td><td>${x.commits_sampled}/${x.commits_total} commits · ${x.verdict?'verdict '+esc(x.verdict):'<span class="warn">acceptance check not run</span>'}${x.fast?' · <span class="warn">fast</span>':''}</td><td><a href="${b}${encodeURIComponent(x.zip.split('/').pop())}">zip</a> · <a href="${b}MANIFEST.json">manifest</a>${x.verdict?` · <a href="${b}VERDICT.json">verdict</a>`:''}</td></tr>`}).join('');
  const pre=$('log');const atBottom=pre.scrollTop+pre.clientHeight>=pre.scrollHeight-8;pre.textContent=j.log.join('\n');if(atBottom)pre.scrollTop=pre.scrollHeight}}catch(e){}}
 drawTabs();showPanel();drawSel();cfg();setInterval(poll,2000);poll();
 </script></body></html>

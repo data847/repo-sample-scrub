@@ -33,17 +33,26 @@ def run_repo(ref: Optional[bridge.RepoRef], local_path: Optional[Path], job_id: 
 
     src = Path(local_path) if local_path else bridge.ensure_clone(ref, tokens, log)
     sample_dir = dest / "sample"
+    sample_manifest = sample_dir.parent / f"{sample_dir.name}.manifest.json"
+    ok = False
     try:
         manifest = sampler.sample(src, sample_dir, opts.pct, opts.branch, opts.min_commits, log)
         res = scrub.scrub(sample_dir, slug, run_id, opts.terms, opts.fast, log, redact)
+        ok = True
     finally:
         # the un-scrubbed intermediate must never be left in outputs, even on failure
         shutil.rmtree(sample_dir, ignore_errors=True)
+        if not ok:
+            sample_manifest.unlink(missing_ok=True)
+            try:
+                dest.rmdir()  # nothing worth keeping from a run that produced nothing
+            except OSError:
+                pass
     for name, path in (("zip", res["zip"]), ("MANIFEST.json", res["manifest"]),
                        ("VERDICT.json", res["verdict"])):
         if path and Path(path).exists():
             shutil.copy2(path, dest / (Path(path).name if name == "zip" else name))
-    shutil.move(str(sample_dir.parent / f"{sample_dir.name}.manifest.json"), dest / "SAMPLE_MANIFEST.json")
+    shutil.move(str(sample_manifest), dest / "SAMPLE_MANIFEST.json")
 
     verdict = None
     if (dest / "VERDICT.json").exists():
