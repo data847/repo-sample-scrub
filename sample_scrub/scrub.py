@@ -32,7 +32,9 @@ def _run(label: str, cmd: List[str], env: dict, log: Callable[[str], None], reda
         lines.append(line)
         log(redact(line.rstrip()))
     if p.wait() != 0:
-        raise ScrubError(f"{label} failed (exit {p.returncode})")
+        # surface the engine's own last message (e.g. the gitleaks finding), not just the exit code
+        tail = next((l.strip() for l in reversed(lines) if l.strip()), "")
+        raise ScrubError(f"{label} failed (exit {p.returncode})" + (f": {tail[:300]}" if tail else ""))
     return "".join(lines)
 
 

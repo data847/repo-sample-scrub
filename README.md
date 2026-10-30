@@ -152,6 +152,14 @@ restarts; finished results remain under `outputs/<job-id>/`.
 **Building.** Use `docker compose build`: the Dockerfile takes codebase-profiler and
 repo-pii-scrub as named build contexts, so a bare `docker build .` fails by design.
 
+**The image's scrub is the public one, and it is stricter than the workspace version.**
+The public `repo-pii-scrub` lacks the false-positive handling (allow-lists, placeholder and
+entropy-shape checks) that the DataLabs workspace copy has. Its gitleaks package gate can
+therefore refuse a repo over harmless strings: observed on a repo whose numeric image filenames,
+assigned to a key-named JS property, match gitleaks' `generic-api-key` rule. It fails
+closed (nothing is delivered) and the UI shows the reason; for such repos use the local
+install, or build the image from a newer `repo-pii-scrub` via `SCRUB_SRC`.
+
 **Acceptance check.** The image builds `repo-pii-scrub` from its public repository,
 which does not include `verify_deliverable.py` (the workspace version does, but depends
 on the DataLabs layout). In Docker the scrub, gitleaks assertion and zip all run, but

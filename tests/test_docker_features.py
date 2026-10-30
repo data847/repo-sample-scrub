@@ -159,6 +159,16 @@ class FailedRunCleanupTest(unittest.TestCase):
             self.assertEqual(list(Path(d, "jobx").rglob("*")), [])  # nothing left, not even the dir shell
 
 
+class RunFailureMessageTest(unittest.TestCase):
+    def test_failure_includes_the_engines_last_line(self):
+        import sys
+        code = "import sys; print('noise'); print('RuntimeError: gitleaks found 4 real secret(s)'); sys.exit(1)"
+        with self.assertRaises(scrub.ScrubError) as cm:
+            scrub._run("package", [sys.executable, "-c", code], dict(os.environ), lambda *_: None, lambda s: s)
+        self.assertIn("package failed (exit 1)", str(cm.exception))
+        self.assertIn("gitleaks found 4 real secret(s)", str(cm.exception))
+
+
 class SaltTest(unittest.TestCase):
     def test_salt_required_even_in_fast_mode(self):
         with tempfile.TemporaryDirectory() as d:
