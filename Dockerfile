@@ -8,7 +8,9 @@ FROM python:3.12-slim
 
 ARG GITLEAKS_VERSION=8.24.2
 ARG TARGETARCH
-ENV PIP_NO_CACHE_DIR=1 PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+# long timeout + retries: the NER stack pulls multi-hundred-MB wheels, and a single read timeout
+# should not fail a 10-minute build
+ENV PIP_NO_CACHE_DIR=1 PIP_DEFAULT_TIMEOUT=120 PIP_RETRIES=10 PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates curl build-essential \
@@ -21,15 +23,20 @@ RUN set -eux; \
       | tar -xz -C /usr/local/bin gitleaks; \
     gitleaks version
 
+# Requirements first: they change rarely, so swapping the scrub/profiler SOURCE below
+# does not re-download PyTorch and the NER stack.
+COPY --from=profiler-src /requirements.txt /tmp/profiler-requirements.txt
+COPY --from=scrub-src    /requirements.txt /tmp/scrub-requirements.txt
+
+# one interpreter for everything: profiler deps (repo listing/cloning) + the scrub engine
+RUN pip install -r /tmp/profiler-requirements.txt \
+ && pip install -r /tmp/scrub-requirements.txt \
+ && pip install "git+https://github.com/Fermatix/repo-sanitizer" \
+ && (pip check || true)   # informational: the profiler pins and the sanitizer overlap loosely
+
 # the two projects this tool drives
 COPY --from=profiler-src / /opt/codebase-profiler
 COPY --from=scrub-src    / /opt/repo-pii-scrub
-
-# one interpreter for everything: profiler deps (repo listing/cloning) + the scrub engine
-RUN pip install -r /opt/codebase-profiler/requirements.txt \
- && pip install -r /opt/repo-pii-scrub/requirements.txt \
- && pip install "git+https://github.com/Fermatix/repo-sanitizer" \
- && (pip check || true)   # informational: the profiler pins and the sanitizer overlap loosely
 
 # the package gate shells out to zip
 RUN apt-get update && apt-get install -y --no-install-recommends zip unzip \

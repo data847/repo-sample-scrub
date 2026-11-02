@@ -114,8 +114,8 @@ REPOS_DIR=~/code REPO_SANITIZER_SALT=$(openssl rand -hex 32) docker compose up -
 
 The image carries `git`, `gitleaks`, codebase-profiler and repo-pii-scrub with its
 NER model dependencies. They are built in from the public GitHub repos by default;
-to build from local checkouts instead:
-`PROFILER_SRC=../codebase-profiler SCRUB_SRC=../skills/repo-pii-scrub docker compose build`.
+to build from local checkouts instead see "Which `repo-pii-scrub` goes into the image" below
+(`SCRUB_SRC` must point at the output of `tools/make_scrub_src.py`, not at a raw workspace checkout).
 
 | Mount / setting | Purpose |
 |-----------------|---------|
@@ -152,19 +152,35 @@ restarts; finished results remain under `outputs/<job-id>/`.
 **Building.** Use `docker compose build`: the Dockerfile takes codebase-profiler and
 repo-pii-scrub as named build contexts, so a bare `docker build .` fails by design.
 
-**The image's scrub is the public one, and it is stricter than the workspace version.**
-The public `repo-pii-scrub` lacks the false-positive handling (allow-lists, placeholder and
-entropy-shape checks) that the DataLabs workspace copy has. Its gitleaks package gate can
-therefore refuse a repo over harmless strings: observed on a repo whose numeric image filenames,
-assigned to a key-named JS property, match gitleaks' `generic-api-key` rule. It fails
-closed (nothing is delivered) and the UI shows the reason; for such repos use the local
-install, or build the image from a newer `repo-pii-scrub` via `SCRUB_SRC`.
+**Which `repo-pii-scrub` goes into the image.** By default the image builds from the public
+`data847/repo-pii-scrub`, which is older than the DataLabs workspace copy: it lacks the
+false-positive handling in the gitleaks package gate (allow-lists, placeholder and
+entropy-shape checks) and the `verify_deliverable.py` acceptance gate. Consequences: it can
+refuse a repo over harmless strings (observed: numeric image filenames assigned to a
+key-named JS property matching `generic-api-key`), and results show "acceptance check not run". It fails closed.
 
-**Acceptance check.** The image builds `repo-pii-scrub` from its public repository,
-which does not include `verify_deliverable.py` (the workspace version does, but depends
-on the DataLabs layout). In Docker the scrub, gitleaks assertion and zip all run, but
-the extra acceptance gate does not: results show "acceptance check not run" instead of
-a verdict. Run `verify_deliverable.py` yourself on a delivered zip if you need it.
+For parity with the workspace pipeline, build from your own checkout:
+
+```bash
+python tools/make_scrub_src.py ../skills/repo-pii-scrub        # -> build/scrub-src
+SCRUB_SRC=build/scrub-src docker compose build
+```
+
+`make_scrub_src.py` copies an explicit allow-list (the nine modules the pipeline uses, the
+rulepack and the requirements; never `.salt`, `.venv`, `.env` or per-customer batch scripts),
+replaces the workspace-only `workspace_paths.py` with a layout-independent shim, and drops
+the `repo-sanitizer` requirement line (not on PyPI; the Dockerfile installs it from git).
+The resulting image runs the same package gate and acceptance gate as the local install.
+A build from your own checkout may still carry incidental text from it (comments naming
+projects), so do not push that image to a registry.
+
+**Persistence.** Deliverables and clones persist on the host mounts. The jobs list and any
+credentials typed into the UI live in the server's memory and reset when the container
+restarts; finished results remain under `outputs/<job-id>/`.
+
+**Building.** Use `docker compose build`: the Dockerfile takes codebase-profiler and
+repo-pii-scrub as named build contexts, so a bare `docker build .` fails by design. The
+requirements install is its own layer, so changing `SCRUB_SRC` does not re-download PyTorch.
 
 ## Configuration
 

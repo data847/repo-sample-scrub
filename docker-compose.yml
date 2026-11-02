@@ -10,7 +10,8 @@ services:
       context: .
       additional_contexts:
         # public GitHub by default; point at a local checkout to build from your own copy:
-        #   PROFILER_SRC=../codebase-profiler SCRUB_SRC=../skills/repo-pii-scrub
+        #   python tools/make_scrub_src.py ../skills/repo-pii-scrub && SCRUB_SRC=build/scrub-src
+        #   (SCRUB_SRC must be the output of tools/make_scrub_src.py, never a raw workspace copy)
         profiler-src: ${PROFILER_SRC:-https://github.com/lh2-tech/codebase-profiler.git#main}
         scrub-src: ${SCRUB_SRC:-https://github.com/data847/repo-pii-scrub.git#main}
     image: sample-scrub:local
