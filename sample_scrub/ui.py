@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import queue
 import re
+import shutil
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -19,7 +20,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import urlsplit
 
-from . import bridge, config, pipeline
+from . import bridge, config, native, p4_sampler, pipeline
 
 STATIC = Path(__file__).parent / "static"
 DOWNLOADABLE = {"RESULT.json", "MANIFEST.json", "VERDICT.json", "SAMPLE_MANIFEST.json"}
@@ -39,19 +40,24 @@ def _check_root(p: Path, original: str) -> None:
             "If this server runs in Docker, use the path as mounted inside the container.")
 
 
-def local_repo(path: str) -> Path:
+MARKER = {"git": ".git", "hg": ".hg"}
+LABEL = {"git": "git", "hg": "Mercurial"}
+
+
+def local_repo(path: str, vcs: str = "git") -> Path:
     p = Path(path).expanduser()
     if not p.is_absolute():
         raise bridge.BridgeError(f"local path must be absolute: {path}")
     p = p.resolve()
     _check_root(p, path)
-    if not (p / ".git").exists():
-        raise bridge.BridgeError(f"not a git repository: {p}")
+    if not (p / MARKER[vcs]).exists():
+        raise bridge.BridgeError(f"not a {LABEL[vcs]} repository: {p}")
     return p
 
 
-def scan_local(path: str) -> List[dict]:
-    """The path itself if it is a repo, else the git repos directly inside it."""
+def scan_local(path: str, vcs: str = "git") -> List[dict]:
+    """The path itself if it is a repo, else the repos (``.git`` or ``.hg``) directly inside it."""
+    marker = MARKER[vcs]
     p = Path(path).expanduser()
     if not p.is_absolute():
         raise bridge.BridgeError(f"path must be absolute: {path}")
@@ -60,10 +66,31 @@ def scan_local(path: str) -> List[dict]:
     if not p.is_dir():
         raise bridge.BridgeError(f"not a directory: {p}")
     # a child symlinked to somewhere outside the allowed roots must not be listed
-    found = [p] if (p / ".git").exists() else sorted(
+    found = [p] if (p / marker).exists() else sorted(
         c for c in p.iterdir() if c.is_dir() and not c.name.startswith(".")
-        and (c / ".git").exists() and _within_roots(c.resolve()))
-    return [{"ref": f"local:{c}", "name": c.name, "branch": str(c)} for c in found]
+        and (c / marker).exists() and _within_roots(c.resolve()))
+    prefix = "local" if vcs == "git" else vcs
+    return [{"ref": f"{prefix}:{c}", "name": c.name, "branch": str(c)} for c in found]
+
+
+def list_p4(tokens: config.Tokens) -> List[dict]:
+    """Top-level folders of every depot the saved Perforce credentials can see (one folder = one sample)."""
+    try:
+        p4 = p4_sampler._p4m()
+        conn = native.p4_conn(tokens)
+    except p4_sampler.SampleError as exc:
+        raise bridge.BridgeError(str(exc)) from exc
+    try:
+        p4.connect(conn, fingerprint=tokens.p4_fingerprint)
+        items: List[dict] = []
+        for depot in p4.list_depots(conn):
+            if depot["type"] not in ("local", "stream"):
+                continue  # spec / unload / archive / graph depots hold no project history
+            for d in p4.list_top_dirs(conn, depot["name"]) or [f"//{depot['name']}"]:
+                items.append({"ref": f"p4:{d}", "name": d, "branch": depot["name"]})
+        return items
+    except p4.P4Error as exc:
+        raise bridge.BridgeError(str(exc)) from exc
 
 
 class Job:
@@ -80,7 +107,8 @@ class Job:
 
     def view(self, with_log: bool = False) -> dict:
         d = {"id": self.id, "status": self.status, "repos": self.repos, "results": self.results,
-             "pct": self.opts.pct, "fast": self.opts.fast, "created": self.created}
+             "pct": self.opts.pct, "fast": self.opts.fast, "created": self.created,
+             "native": sum(1 for r in self.repos if r.split(":", 1)[0] in native.VCS)}
         if with_log:
             d["log"] = self.log
         return d
@@ -110,11 +138,17 @@ class Manager:
             failed = 0
             for text in job.repos:
                 try:
-                    if text.startswith("local:"):
-                        ref, local = None, local_repo(text[len("local:"):])
+                    if text.startswith(("hg:", "p4:")):
+                        vcs, _, target = text.partition(":")
+                        if vcs == "hg":
+                            target = str(local_repo(target, "hg"))
+                        res = native.run_native(vcs, target, job.id, job.opts, self.tokens, job.add)
                     else:
-                        ref, local = bridge.parse_repo(text), None
-                    res = pipeline.run_repo(ref, local, job.id, job.opts, self.tokens, job.add)
+                        if text.startswith("local:"):
+                            ref, local = None, local_repo(text[len("local:"):])
+                        else:
+                            ref, local = bridge.parse_repo(text), None
+                        res = pipeline.run_repo(ref, local, job.id, job.opts, self.tokens, job.add)
                     job.results[text] = {"ok": True, **res}
                 except Exception as exc:
                     failed += 1
@@ -176,6 +210,9 @@ def make_handler(mgr: Manager, port: int):
                     "profiler": str(config.profiler_dir() or ""),
                     "pii_scrub": str(config.pii_scrub_dir() or ""),
                     "salt": bool(__import__("os").environ.get("REPO_SANITIZER_SALT")),
+                    "p4": {**mgr.tokens.p4_state(), "cli": bool(shutil.which("p4")),
+                           "server": bool(shutil.which("p4d"))},
+                    "hg": bool(shutil.which("hg")),
                     "outputs": str(config.outputs_root()),
                     "local_roots": [str(r) for r in config.local_roots()]})
             if path == "/api/jobs":
@@ -192,7 +229,7 @@ def make_handler(mgr: Manager, port: int):
         def _download(self, job: str, slug: str, name: str) -> None:
             if not all(SAFE.match(x) and x not in (".", "..") for x in (job, slug, name)):
                 return self._json(400, {"error": "bad path"})
-            if not (name in DOWNLOADABLE or name.endswith("_sanitized.zip")):
+            if not (name in DOWNLOADABLE or name.endswith(("_sanitized.zip", "_sample.zip"))):
                 return self._json(404, {"error": "not downloadable"})
             f = (config.outputs_root() / job / slug / name).resolve()
             if config.outputs_root() not in f.parents or not f.is_file():
@@ -211,6 +248,8 @@ def make_handler(mgr: Manager, port: int):
             except ValueError:
                 return self._json(400, {"error": "invalid JSON"})
             try:
+                if self.path == "/api/list" and body.get("platform") == "p4":
+                    return self._json(200, list_p4(mgr.tokens))
                 if self.path == "/api/list":
                     platform = body.get("platform", "")
                     repos = bridge.list_repos(platform, str(body.get("owner", "")).strip(),
@@ -218,22 +257,37 @@ def make_handler(mgr: Manager, port: int):
                     return self._json(200, [{"ref": f"{r.platform}:{r.full_name}", "name": r.full_name,
                                              "branch": r.default_branch} for r in repos])
                 if self.path == "/api/scan":
-                    return self._json(200, scan_local(str(body.get("path", "")).strip()))
+                    vcs = body.get("vcs", "git")
+                    if vcs not in MARKER:
+                        return self._json(400, {"error": "vcs must be git or hg"})
+                    return self._json(200, scan_local(str(body.get("path", "")).strip(), vcs))
                 if self.path == "/api/credentials":
                     if body.get("clear"):
-                        mgr.tokens.clear(body["clear"] if body["clear"] in bridge.PLATFORMS else None)
+                        mgr.tokens.clear(body["clear"] if body["clear"] in (*bridge.PLATFORMS, "p4") else None)
                     else:
                         mgr.tokens.set(**{k: str(body.get(k) or "") for k in
-                                          ("github", "gitlab", "bitbucket", "bitbucket_email")})
-                    return self._json(200, {"tokens": mgr.tokens.available(),
+                                          ("github", "gitlab", "bitbucket", "bitbucket_email",
+                                           "p4_port", "p4_user", "p4_secret", "p4_fingerprint")})
+                    return self._json(200, {"tokens": mgr.tokens.available(), "p4": mgr.tokens.p4_state(),
                                             "bitbucket_email": bool(mgr.tokens.bitbucket_email)})
                 if self.path == "/api/jobs":
                     repos = [str(r) for r in body.get("repos", []) if str(r).strip()]
                     if not repos:
                         return self._json(400, {"error": "select at least one repo"})
-                    for r in repos:  # fail fast on a bad local path instead of after queueing
+                    for r in repos:  # fail fast on a bad path / missing tool instead of after queueing
                         if r.startswith("local:"):
                             local_repo(r[len("local:"):])
+                        elif r.startswith("hg:"):
+                            local_repo(r[3:], "hg")
+                            if not shutil.which("hg"):
+                                raise bridge.BridgeError("`hg` is not installed on the server")
+                        elif r.startswith("p4:"):
+                            if not r[3:].startswith("//"):
+                                raise bridge.BridgeError(f"not a depot path (must start with //): {r[3:]}")
+                            if not (shutil.which("p4") and shutil.which("p4d")):
+                                raise bridge.BridgeError("`p4` and `p4d` are both needed on the server for a Perforce sample")
+                            if not mgr.tokens.p4_state()["ready"]:
+                                raise bridge.BridgeError("save the Perforce server and user first (Perforce tab)")
                     pct = float(body.get("pct", 5))
                     if not 0 < pct <= 100:
                         return self._json(400, {"error": "pct must be in (0, 100]"})

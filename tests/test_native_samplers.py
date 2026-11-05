@@ -89,19 +89,20 @@ def p4env(port: str, user: str, client: str, root: Path) -> dict:
             "P4ENVIRO": os.devnull, "P4TICKETS": str(root / "tickets")}
 
 
-@unittest.skipUnless(HAVE_P4, "p4 / p4d not installed")
-class P4SamplerTest(unittest.TestCase):
+class P4Fixture:
+    """A throw-away source Perforce server with 25 changelists on //depot/proj (shared with the UI tests)."""
+
     @classmethod
     def setUpClass(cls) -> None:
         cls._tmp = tempfile.TemporaryDirectory()
         cls.root = Path(cls._tmp.name)
         (cls.root / "srv").mkdir()
-        cls.port = f"127.0.0.1:{_free_port()}"
-        subprocess.run(["p4d", "-r", str(cls.root / "srv"), "-p", cls.port, "-d", "-L", str(cls.root / "log")],
+        cls.p4port = f"127.0.0.1:{_free_port()}"
+        subprocess.run(["p4d", "-r", str(cls.root / "srv"), "-p", cls.p4port, "-d", "-L", str(cls.root / "log")],
                        check=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(50):
             try:
-                with socket.create_connection(cls.port.split(":"), timeout=0.2):
+                with socket.create_connection(cls.p4port.split(":"), timeout=0.2):
                     break
             except OSError:
                 time.sleep(0.1)
@@ -119,7 +120,7 @@ class P4SamplerTest(unittest.TestCase):
 
     @classmethod
     def p4(cls, user, *args, stdin=None, cwd=None, check=True):
-        env = p4env(cls.port, user, f"ws_{user}", cls.root)
+        env = p4env(cls.p4port, user, f"ws_{user}", cls.root)
         if cwd:
             env["PWD"] = str(cwd)
         r = subprocess.run(["p4", *args], input=stdin, capture_output=True, text=True, cwd=cwd, env=env)
@@ -158,9 +159,11 @@ class P4SamplerTest(unittest.TestCase):
         shutil.rmtree(cls.root, ignore_errors=True)
         cls._tmp.cleanup()
 
+@unittest.skipUnless(HAVE_P4, "p4 / p4d not installed")
+class P4SamplerTest(P4Fixture, unittest.TestCase):
     def conn(self):
         p4 = p4_sampler._p4m()
-        return p4.P4Conn(self.port, "alice")
+        return p4.P4Conn(self.p4port, "alice")
 
     def test_oldest_twenty_percent_of_a_depot_path(self) -> None:
         p4 = p4_sampler._p4m()

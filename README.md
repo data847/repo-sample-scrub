@@ -49,6 +49,14 @@ P4_PASSWORD=... python -m sample_scrub native-p4 --p4-port ssl:host:1666 --p4-us
 
 Authors, dates and descriptions are kept as they are, so these samples are **not anonymised**.
 
+**In the UI** (`python -m sample_scrub ui`): the **Mercurial** tab scans a path for `.hg` repos; the **Perforce**
+tab takes the server, user and password/ticket (held in server memory only, like the other platforms'
+tokens), lists the depot folders and runs the replay. Selected repos from any tab can go into one job; the
+brand terms and Fast mode apply only to the git ones, and the page says so. Each native result is a
+`<slug>_sample.zip` plus `SAMPLE_MANIFEST.json`, with the sampler's own check as the verdict
+(`verify clean` / `parity ok`) and a "not scrubbed" marker. The server needs `hg`, or `p4` and `p4d`; the
+setup badges show which are found.
+
 ## Requirements
 
 | Needs | Why |
