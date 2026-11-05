@@ -71,6 +71,37 @@ def _client_spec(name: str, user: str, root: Path, scope: str) -> str:
             f"View:\n\t\"{scope}\" \"//{name}/...\"\n")
 
 
+# Past this many files a changelist is replayed with a whole-tree sync + reconcile instead of per-file ones:
+# the file list would be a pipe full of arguments, and the tree pass is then the cheaper of the two anyway.
+INCREMENTAL_MAX_FILES = 20000
+_BLOCK = re.compile(r"(?m)^(?=Change \d+ by )")
+
+
+def _file_lists(p4, conn, changes, prefix: str) -> dict:
+    """``{change: (files in scope, truncated)}`` from ``p4 describe -s``, 40 changelists per call.
+
+    ``truncated`` means describe elided files ("... ... and N more"), so the list cannot be trusted and the
+    changelist must be replayed against the whole tree."""
+    out: dict = {}
+    for i in range(0, len(changes), 40):
+        batch = changes[i:i + 40]
+        text = p4.run_p4_text(conn, "describe", "-s", *[str(c["change"]) for c in batch], timeout=900, check=False)
+        for block in _BLOCK.split(text):
+            m = re.match(r"Change (\d+) by ", block)
+            if not m:
+                continue
+            parsed = p4.parse_describe(block).get(int(m.group(1)), {"files": []})
+            files = [f["path"] for f in parsed["files"] if f["path"].startswith(prefix)]
+            out[int(m.group(1))] = (files, any(ln.startswith("... ...") for ln in block.splitlines()))
+    return out
+
+
+def _p4_lines(conn, client: str, args, lines, timeout: int = 3600) -> subprocess.CompletedProcess:
+    """Run ``p4 -x - <args>`` with one argument per stdin line (no argument-length limit, no shell quoting)."""
+    return subprocess.run(["p4", "-c", client, "-x", "-", *args], input="\n".join(lines) + "\n",
+                          capture_output=True, text=True, errors="replace", timeout=timeout, env=conn.env())
+
+
 def _fmt_time(epoch: int) -> str:
     return time.strftime("%Y/%m/%d %H:%M:%S", time.localtime(epoch))
 
@@ -130,10 +161,20 @@ def sample(conn, depot_path: str, out_dir: Path, pct: float = 5.0, min_commits: 
         directory = p4.user_directory(conn)
         made_users = {"sampler"}
         mapping, skipped, attribution_failures = [], [], []
+        lists = _file_lists(p4, conn, chosen, prefix)
+        incremental = full_tree = 0
         for n, c in enumerate(chosen, 1):
-            p4.run_p4_text(conn, "sync", "-q", f"{scope}@{c['change']}", client=src_client, timeout=3600)
-            p4.run_p4_text(tgt, "reconcile", "-a", "-e", "-d", f"//{tgt_client}/...", client=tgt_client,
-                           timeout=3600, check=False)
+            files, truncated = lists.get(c["change"], ([], True))
+            if files and not truncated and len(files) <= INCREMENTAL_MAX_FILES:
+                # touch only what this changelist touched: cost follows the change, not the size of the tree
+                _p4_lines(conn, src_client, ["sync", "-q"], [f"{f}@{c['change']}" for f in files])
+                _p4_lines(tgt, tgt_client, ["reconcile", "-a", "-e", "-d"], [str(work / f[len(prefix):]) for f in files])
+                incremental += 1
+            else:
+                p4.run_p4_text(conn, "sync", "-q", f"{scope}@{c['change']}", client=src_client, timeout=3600)
+                p4.run_p4_text(tgt, "reconcile", "-a", "-e", "-d", f"//{tgt_client}/...", client=tgt_client,
+                               timeout=3600, check=False)
+                full_tree += 1
             desc = c["desc"] or "<no description>"
             proc = subprocess.run(["p4", "-c", tgt_client, "submit", "-d", desc], capture_output=True, text=True,
                                   env=tgt.env(), errors="replace")
@@ -191,6 +232,7 @@ def sample(conn, depot_path: str, out_dir: Path, pct: float = 5.0, min_commits: 
         "reachable_commits_in_sample": replayed, "skipped_empty_changelists": skipped,
         "attribution_not_restored": attribution_failures,
         "parity": parity, "changes": mapping,
+        "replay": {"incremental": incremental, "full_tree_fallbacks": full_tree},
         "generated_utc": datetime.now(timezone.utc).isoformat(),
         "not_preserved": "original changelist numbers, integration history, shelves, jobs, labels, file-type overrides",
     }

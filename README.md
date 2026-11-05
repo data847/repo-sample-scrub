@@ -44,6 +44,7 @@ P4_PASSWORD=... python -m sample_scrub native-p4 --p4-port ssl:host:1666 --p4-us
 | Cutoff | `ceil(N% × changesets reachable from the branch's newest open head)`, parents first | `ceil(N% × submitted changelists touching the path)`, oldest first |
 | Result | a normal `.hg` repo (profile it with `codebase-profiler --hg`) | `p4root/` depot + checkpoint (serve with `p4d -r p4root`, profile with `codebase-profiler --p4-port`) |
 | Dropped | later changesets, other branches' own work, bookmarks, the `[paths]` link to the source (it can hold credentials), uncommitted work | everything outside the path and after the cutoff; the source server is never written to |
+| Replay cost | n/a | each changelist touches only its own files (`p4 describe` lists them), so a step costs the size of the change, not of the tree; a changelist whose file list describe elides falls back to a whole-tree pass (`replay` in the manifest counts both) |
 | Integrity check | `hg verify` | file-by-file digest comparison against the source at the cutoff changelist (`parity` in the manifest) |
 | Not preserved | subrepos, largefiles | original changelist numbers (`changes` maps old -> new), integration history (a branch becomes adds/edits), shelves, jobs, labels, file-type overrides |
 

@@ -173,6 +173,8 @@ class P4SamplerTest(P4Fixture, unittest.TestCase):
         self.assertEqual((m["total_commits"], m["cutoff_commit_index"]), (25, 5))  # ceil(25 * 20%)
         self.assertEqual(m["reachable_commits_in_sample"], 5)
         self.assertTrue(m["parity"]["ok"], m["parity"])
+        # every changelist was replayed by touching only its own files, never a whole-tree pass
+        self.assertEqual(m["replay"], {"incremental": 5, "full_tree_fallbacks": 0})
         self.assertEqual(m["parity"]["files_at_cutoff"], m["parity"]["files_in_sample"])
         # serve the sample and read it back through the same p4 helpers the profiler uses
         port = f"127.0.0.1:{_free_port()}"
@@ -194,6 +196,23 @@ class P4SamplerTest(P4Fixture, unittest.TestCase):
         self.assertEqual(len(list(p4.iter_changes(self.conn(), "//depot/proj"))), 25)
         self.assertTrue((out.parent / "sample.manifest.json").is_file())
         self.assertEqual(sorted(p.name for p in out.iterdir()).count("RESTORE.txt"), 1)
+
+    def test_a_changelist_with_an_elided_file_list_falls_back_to_a_full_tree_pass(self) -> None:
+        # describe cannot be trusted when it elides files: the sampler must replay that changelist against the
+        # whole tree (and still end with matching digests) rather than silently miss files
+        real = p4_sampler._file_lists
+
+        def elided(p4, conn, changes, prefix):
+            return {k: (v[0], True) if i == 2 else v for i, (k, v) in enumerate(real(p4, conn, changes, prefix).items())}
+
+        p4_sampler._file_lists = elided
+        try:
+            m = p4_sampler.sample(self.conn(), "//depot/proj", self.root / "out3" / "sample", pct=20, min_commits=10,
+                                  log=lambda *_: None)
+        finally:
+            p4_sampler._file_lists = real
+        self.assertEqual(m["replay"], {"incremental": 4, "full_tree_fallbacks": 1})
+        self.assertTrue(m["parity"]["ok"], m["parity"])
 
     def test_refuses_a_short_history(self) -> None:
         with self.assertRaises(p4_sampler.SampleError):
