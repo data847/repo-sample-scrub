@@ -26,6 +26,29 @@ pipeline. Works with **GitHub, GitLab and Bitbucket**, from a CLI or a local web
 
 The un-scrubbed intermediate sample is deleted after the run (also on failure).
 
+## Mercurial and Perforce (native samples, no scrub)
+
+`repo-pii-scrub` only understands git, so these two keep their own format. Same cutoff rule as git:
+the oldest `ceil(N%)` of one branch (Mercurial) or one depot path (Perforce), refused below `--min-commits`.
+
+```bash
+# Mercurial: hg clone -r <cutoff>: only that changeset and its ancestors are copied
+python -m sample_scrub native-hg --local ~/hg/project --pct 5
+
+# Perforce: a fresh local p4d is built by replaying the first N% of changelists (needs p4 and p4d)
+P4_PASSWORD=... python -m sample_scrub native-p4 --p4-port ssl:host:1666 --p4-user alice --path //depot/project
+```
+
+| | Mercurial | Perforce |
+|---|---|---|
+| Cutoff | `ceil(N% × changesets reachable from the branch's newest open head)`, parents first | `ceil(N% × submitted changelists touching the path)`, oldest first |
+| Result | a normal `.hg` repo (profile it with `codebase-profiler --hg`) | `p4root/` depot + checkpoint (serve with `p4d -r p4root`, profile with `codebase-profiler --p4-port`) |
+| Dropped | later changesets, other branches' own work, bookmarks, the `[paths]` link to the source (it can hold credentials), uncommitted work | everything outside the path and after the cutoff; the source server is never written to |
+| Integrity check | `hg verify` | file-by-file digest comparison against the source at the cutoff changelist (`parity` in the manifest) |
+| Not preserved | subrepos, largefiles | original changelist numbers (`changes` maps old -> new), integration history (a branch becomes adds/edits), shelves, jobs, labels, file-type overrides |
+
+Authors, dates and descriptions are kept as they are, so these samples are **not anonymised**.
+
 ## Requirements
 
 | Needs | Why |
