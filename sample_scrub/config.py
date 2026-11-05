@@ -117,11 +117,17 @@ class Tokens:
         self.gitlab = get("GITLAB_TOKEN", "gitlab_token")
         self.bitbucket = get("BITBUCKET_TOKEN", "bitbucket_token")
         self.bitbucket_email = get("BITBUCKET_EMAIL", "bitbucket_email")
+        # Perforce: a server, a user and a password-or-ticket (the secret is the only part treated as sensitive)
+        self.p4_port = get("P4PORT")
+        self.p4_user = get("P4USER")
+        self.p4_secret = get("P4_TICKET", "P4_PASSWORD")
+        self.p4_fingerprint = get("P4_FINGERPRINT")
 
     def set(self, **fields: str) -> None:
         """Replace credentials held in memory (UI entry). Blank values are ignored,
         so submitting one platform does not wipe the others. Never persisted."""
-        for name in ("github", "gitlab", "bitbucket", "bitbucket_email"):
+        for name in ("github", "gitlab", "bitbucket", "bitbucket_email", "p4_port", "p4_user", "p4_secret",
+                     "p4_fingerprint"):
             value = (fields.get(name) or "").strip()
             if value:
                 setattr(self, name, value)
@@ -129,8 +135,9 @@ class Tokens:
     def clear(self, platform: Optional[str] = None) -> None:
         """Forget one platform's credentials (bitbucket also drops its email), or all."""
         names = {"github": ["github"], "gitlab": ["gitlab"],
-                 "bitbucket": ["bitbucket", "bitbucket_email"]}.get(platform or "") or \
-            ["github", "gitlab", "bitbucket", "bitbucket_email"]
+                 "bitbucket": ["bitbucket", "bitbucket_email"],
+                 "p4": ["p4_port", "p4_user", "p4_secret", "p4_fingerprint"]}.get(platform or "") or \
+            ["github", "gitlab", "bitbucket", "bitbucket_email", "p4_port", "p4_user", "p4_secret", "p4_fingerprint"]
         for n in names:
             setattr(self, n, "")
 
@@ -140,8 +147,13 @@ class Tokens:
     def available(self) -> Dict[str, bool]:
         return {"github": bool(self.github), "gitlab": bool(self.gitlab), "bitbucket": bool(self.bitbucket)}
 
+    def p4_state(self) -> Dict[str, object]:
+        """What the page may learn about Perforce: the server and user (not secrets) and whether a secret is held."""
+        return {"port": self.p4_port, "user": self.p4_user, "secret": bool(self.p4_secret),
+                "ready": bool(self.p4_port and self.p4_user)}
+
     def redact(self, text: str) -> str:
-        for t in (self.github, self.gitlab, self.bitbucket):
+        for t in (self.github, self.gitlab, self.bitbucket, self.p4_secret):
             if t:
                 text = text.replace(t, "***")
         return text

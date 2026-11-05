@@ -44,10 +44,19 @@ P4_PASSWORD=... python -m sample_scrub native-p4 --p4-port ssl:host:1666 --p4-us
 | Cutoff | `ceil(N% × changesets reachable from the branch's newest open head)`, parents first | `ceil(N% × submitted changelists touching the path)`, oldest first |
 | Result | a normal `.hg` repo (profile it with `codebase-profiler --hg`) | `p4root/` depot + checkpoint (serve with `p4d -r p4root`, profile with `codebase-profiler --p4-port`) |
 | Dropped | later changesets, other branches' own work, bookmarks, the `[paths]` link to the source (it can hold credentials), uncommitted work | everything outside the path and after the cutoff; the source server is never written to |
+| Replay cost | n/a | each changelist touches only its own files (`p4 describe` lists them), so a step costs the size of the change, not of the tree; a changelist whose file list describe elides falls back to a whole-tree pass (`replay` in the manifest counts both) |
 | Integrity check | `hg verify` | file-by-file digest comparison against the source at the cutoff changelist (`parity` in the manifest) |
 | Not preserved | subrepos, largefiles | original changelist numbers (`changes` maps old -> new), integration history (a branch becomes adds/edits), shelves, jobs, labels, file-type overrides |
 
 Authors, dates and descriptions are kept as they are, so these samples are **not anonymised**.
+
+**In the UI** (`python -m sample_scrub ui`): the **Mercurial** tab scans a path for `.hg` repos; the **Perforce**
+tab takes the server, user and password/ticket (held in server memory only, like the other platforms'
+tokens), lists the depot folders and runs the replay. Selected repos from any tab can go into one job; the
+brand terms and Fast mode apply only to the git ones, and the page says so. Each native result is a
+`<slug>_sample.zip` plus `SAMPLE_MANIFEST.json`, with the sampler's own check as the verdict
+(`verify clean` / `parity ok`) and a "not scrubbed" marker. The server needs `hg`, or `p4` and `p4d`; the
+setup badges show which are found.
 
 ## Requirements
 
